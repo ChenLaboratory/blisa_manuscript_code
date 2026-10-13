@@ -33,23 +33,29 @@ common_ids <- ids[vapply(ids, function(id) {
 stopifnot(length(common_ids) == 12L)
 common <- dot_data[dot_data$lr_id %in% common_ids, ]
 
-# Match the manuscript report's measured runtime, pseudo-log axes and symbols.
+# Preserve the measured runtime and symbols, with ordinary linear axes.
 scatter <- performance[match(methods, performance$method), ]
 scatter$method <- factor(scatter$method, levels = methods)
 memory_max <- max(scatter$peak_rss_gib)
 runtime_max <- max(scatter$elapsed_minutes, 1)
+memory_breaks <- pretty(c(0, memory_max * 1.25), n = 4)
+runtime_breaks <- pretty(c(0, runtime_max * 1.5), n = 4)
 runtime_plot <- ggplot(scatter,
   aes(x = peak_rss_gib, y = elapsed_minutes, colour = method,
     shape = method, fill = method)) +
   geom_point(size = 3.8, stroke = 0.8) +
+  geom_text(aes(label = sprintf("%.2f min\n%.2f GiB", elapsed_minutes, peak_rss_gib),
+    x = peak_rss_gib + ifelse(method == "spatialdm", -1, 1) * max(memory_breaks) * 0.055,
+    hjust = ifelse(method == "spatialdm", 1, 0)),
+    size = 2.6, lineheight = 0.95, vjust = 0.5, show.legend = FALSE) +
   scale_colour_manual(values = colours, breaks = methods, labels = labels, drop = FALSE) +
   scale_shape_manual(values = shapes, breaks = methods, labels = labels, drop = FALSE) +
   scale_fill_manual(values = colours, breaks = methods, labels = labels, drop = FALSE) +
-  scale_x_continuous(trans = scales::pseudo_log_trans(sigma = 0.5, base = 10),
-    limits = c(0, memory_max * 1.25), breaks = c(0, 1, 10, 50),
+  scale_x_continuous(limits = range(memory_breaks),
+    breaks = memory_breaks, labels = scales::label_comma(),
     expand = expansion(mult = c(0.035, 0.02))) +
-  scale_y_continuous(trans = scales::pseudo_log_trans(sigma = 0.05, base = 10),
-    limits = c(0, runtime_max * 1.5), breaks = c(0, 1, 5, 20),
+  scale_y_continuous(limits = range(runtime_breaks),
+    breaks = runtime_breaks, labels = scales::label_comma(),
     expand = expansion(mult = c(0.035, 0.02))) +
   labs(x = "Peak RAM (GiB)", y = "Runtime (min)", colour = NULL, shape = NULL, fill = NULL) +
   guides(colour = guide_legend(nrow = 2, byrow = TRUE),

@@ -4,17 +4,23 @@ runtime_plot <- function(budget=NULL) {
   shown <- if(is.null(budget)) performance else performance[performance$budget==budget,]
   memory_max <- max(performance$peak_rss_gib)
   runtime_max <- max(performance$elapsed_minutes,1)
+  memory_breaks <- pretty(c(0,memory_max*1.25),n=4)
+  runtime_breaks <- pretty(c(0,runtime_max*1.5),n=4)
   p <- ggplot(shown,aes(peak_rss_gib,elapsed_minutes,colour=condition,
     shape=condition,fill=condition))+
     geom_point(size=3.8,stroke=0.8)+
+    geom_text(aes(label=sprintf("%.2f min\n%.2f GiB",elapsed_minutes,peak_rss_gib),
+      x=peak_rss_gib+ifelse(condition=="spatialdm_permutation",-1,1)*max(memory_breaks)*0.055,
+      hjust=ifelse(condition=="spatialdm_permutation",1,0)),
+      size=2.6,lineheight=0.95,vjust=0.5,show.legend=FALSE)+
     scale_colour_manual(values=colours,breaks=methods,labels=labels,drop=FALSE)+
     scale_shape_manual(values=shapes,breaks=methods,labels=labels,drop=FALSE)+
     scale_fill_manual(values=colours,breaks=methods,labels=labels,drop=FALSE)+
-    scale_x_continuous(trans=scales::pseudo_log_trans(sigma=0.5,base=10),
-      limits=c(0,memory_max*1.25),breaks=c(0,1,10,100,1000),
+    scale_x_continuous(limits=range(memory_breaks),
+      breaks=memory_breaks,
       labels=scales::label_comma(),expand=expansion(mult=c(0.035,0.02)))+
-    scale_y_continuous(trans=scales::pseudo_log_trans(sigma=0.05,base=10),
-      limits=c(0,runtime_max*1.5),breaks=c(0,1,10,100,300),
+    scale_y_continuous(limits=range(runtime_breaks),
+      breaks=runtime_breaks,
       labels=scales::label_comma(),expand=expansion(mult=c(0.035,0.02)))+
     labs(title=if(is.null(budget)) "Visium: both budgets" else
       paste0("Visium: ",budget/1000,"k samples"),
