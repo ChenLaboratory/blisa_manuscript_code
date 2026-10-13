@@ -1,0 +1,16 @@
+analysis,software,version
+Xenium LRI and CCI,blisa,1.0.2
+Visium LRI,blisa,1.0.2
+Aligned cross-platform LRI,R,4.4.2
+Aligned cross-platform LRI,blisa,1.0.2
+Xenium benchmarking,R,4.4.2
+Xenium benchmarking,blisa,1.0.2
+Xenium benchmarking,stLearn,0.4.12
+Xenium benchmarking,SpatialDM,0.2.0
+Visium benchmarking,R,4.4.2
+Visium benchmarking,blisa,1.0.2
+Visium benchmarking,stLearn,0.4.12
+Visium benchmarking,SpatialDM,0.2.0
+Figure plotting,R,4.4.2
+Figure plotting,Python,3.10.18
+Figure plotting,scider,1.9.5

@@ -1,0 +1,28 @@
+# Private manuscript-writing notes.
+/METHODS_writing_reference.md
+
+# Publish code only; keep data and analysis results locally.
+/Data/
+/res/
+
+# Figures are regenerated; do not commit generated panels or assembled PDFs.
+/Figures/
+
+# Never publish PDFs, regardless of their folder or filename case.
+*.[pP][dD][fF]
+
+# Machine-specific settings and transient work.
+.Renviron
+.Rhistory
+.RData
+.Ruserdata
+.DS_Store
+__pycache__/
+*.pyc
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+/renv/library/
+/renv/staging/
