@@ -365,14 +365,9 @@ spe <- readRDS(repo_path("Data", "generated", "visium", "visium_qc_counts_gt3000
 stopifnot(nrow(spe) == 18085L, ncol(spe) == 4412L)
 summary <- utils::read.csv(repo_path("res", "visium", "lri_summary.csv"),
   check.names = FALSE, stringsAsFactors = FALSE)
-spot_files <- sort(list.files(repo_path("res", "visium"),
-  pattern = "^lri_by_spot_part[0-9]{3}\\.csv\\.gz$", full.names = TRUE))
-stopifnot(length(spot_files) == 3L)
-local <- as.data.frame(data.table::rbindlist(lapply(spot_files, function(path) {
-  data.table::fread(path,
-    select = c("lr_id", "spot_id", "p_value", "tested", "native_significant"),
-    na.strings = "NA")
-})))
+local <- as.data.frame(data.table::fread(repo_path("res", "visium", "lri_by_spot.csv.gz"),
+  select = c("lr_id", "spot_id", "p_value", "tested", "native_significant"),
+  na.strings = "NA"))
 summary <- summary[order(summary$rank), , drop = FALSE]
 stopifnot(nrow(summary) == 1616L, !anyDuplicated(summary$lr_id),
           nrow(local) == nrow(summary) * ncol(spe),

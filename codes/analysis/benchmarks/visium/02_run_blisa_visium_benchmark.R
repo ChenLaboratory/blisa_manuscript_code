@@ -67,36 +67,32 @@ summary$native_reason <- ifelse(summary$returned, "Returned by native BLISA",
   ifelse(summary$native_status == "native_filtered", "maximum count <3",
           "total count <200 or non-empty spots <200"))
 
-# Full local p-values/scores/quadrants are retained, in the same compressed CSV
+# Full local p-values/scores/quadrants are retained in one compressed CSV, in the
 # format used for imported results. No native result RDS is written to res/.
 order_ids <- sort(lr_df$lr_id)
-for (first in seq(1L, length(order_ids), by = 100L)) {
-  current <- order_ids[first:min(first+99L, length(order_ids))]
-  current <- current[current %in% lr_ids]
-  path <- file.path(out, sprintf("blisa_permutation_local_lri_results_10000_samples_part%02d.csv.gz",
-                                 (first-1L) %/% 100L + 1L))
-  con <- gzfile(path, open = "wt")
-  if (!length(current)) writeLines("lr_id,spot_id,p_value,score,tested,significant,quadrant", con)
-  for (j in seq_along(current)) {
-    i <- match(current[j], lr_ids)
-    p <- lr$all_pval[[i]]
-    score <- lr$all_lisa[[i]]
-    quadrant <- lr$all_quadrant[[i]]
-    keep <- result$spatial_weights[[if (lr$ccc_mode[i] == "nearby") "keep_idx_queen" else "keep_idx_dist"]]
-    tested <- seq_len(nrow(spots)) %in% keep & is.finite(p)
-    significant <- seq_len(nrow(spots)) %in% lr$sig_index[[i]]
-    stopifnot(all(tested[significant]), all(quadrant[significant] == "High-High"),
-              all(p[significant] <= .05))
-    p[!tested] <- score[!tested] <- NA_real_
-    local <- data.frame(lr_id = lr_ids[i], spot_id = spot_id, p_value = p, score = score,
-                         tested = as.integer(tested), significant = ifelse(tested, as.integer(significant), NA_integer_),
-                         quadrant = as.character(quadrant))
-    write.table(local, con, sep = ",", row.names = FALSE, col.names = j == 1L, na = "NA")
-    summary$n_available[summary$lr_id == lr_ids[i]] <- sum(tested)
-    summary$n_sig[summary$lr_id == lr_ids[i]] <- if (any(tested)) sum(significant) else NA_integer_
-  }
-  close(con)
+current <- order_ids[order_ids %in% lr_ids]
+path <- file.path(out, "blisa_permutation_local_lri_results_10000_samples.csv.gz")
+con <- gzfile(path, open = "wt")
+if (!length(current)) writeLines("lr_id,spot_id,p_value,score,tested,significant,quadrant", con)
+for (j in seq_along(current)) {
+  i <- match(current[j], lr_ids)
+  p <- lr$all_pval[[i]]
+  score <- lr$all_lisa[[i]]
+  quadrant <- lr$all_quadrant[[i]]
+  keep <- result$spatial_weights[[if (lr$ccc_mode[i] == "nearby") "keep_idx_queen" else "keep_idx_dist"]]
+  tested <- seq_len(nrow(spots)) %in% keep & is.finite(p)
+  significant <- seq_len(nrow(spots)) %in% lr$sig_index[[i]]
+  stopifnot(all(tested[significant]), all(quadrant[significant] == "High-High"),
+            all(p[significant] <= .05))
+  p[!tested] <- score[!tested] <- NA_real_
+  local <- data.frame(lr_id = lr_ids[i], spot_id = spot_id, p_value = p, score = score,
+                       tested = as.integer(tested), significant = ifelse(tested, as.integer(significant), NA_integer_),
+                       quadrant = as.character(quadrant))
+  write.table(local, con, sep = ",", row.names = FALSE, col.names = j == 1L, na = "NA")
+  summary$n_available[summary$lr_id == lr_ids[i]] <- sum(tested)
+  summary$n_sig[summary$lr_id == lr_ids[i]] <- if (any(tested)) sum(significant) else NA_integer_
 }
+close(con)
 summary$status <- ifelse(!summary$returned, "NR",
                          ifelse(summary$n_available > 0, "available", "NA"))
 summary$budget <- nperm

@@ -511,15 +511,9 @@ visium_qc_dimensions <- function(spe, database) {
     "Panel-covered CellChatDB pathways" = length(pathways))
 }
 
-# Keep complete CSV output below GitHub's per-file limit, splitting only between LR pairs.
+# Keep the complete spot results in one compressed CSV; large files remain local.
 write_visium_spot_csv <- function(x, directory) {
   dir.create(directory, recursive = TRUE, showWarnings = FALSE)
-  ids <- unique(x$lr_id)
-  groups <- split(ids, ceiling(seq_along(ids) / 800L))
-  for (i in seq_along(groups)) {
-    path <- file.path(directory, sprintf("lri_by_spot_part%03d.csv.gz", i))
-    data.table::fwrite(x[x$lr_id %in% groups[[i]], , drop = FALSE], path,
-      compress = "gzip", na = "NA", quote = "auto")
-    stopifnot(file.info(path)$size < 90 * 1024^2)
-  }
+  data.table::fwrite(x, file.path(directory, "lri_by_spot.csv.gz"),
+    compress = "gzip", na = "NA", quote = "auto")
 }

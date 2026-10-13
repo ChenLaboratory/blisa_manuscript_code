@@ -2,10 +2,11 @@
 
 Only BLISA permutation, stLearn BH-adjusted and SpatialDM permutation results
 are retained. This script does not import inference packages or run a test.
-Native local results are split by LR blocks to keep individual CSVs manageable;
-all LR pairs and spot rows are retained, including unavailable/untested results.
+Native local results are saved as one compressed CSV per method; all LR pairs
+and spot rows are retained, including unavailable/untested results.
 """
 import argparse
+import gzip
 import hashlib
 from pathlib import Path
 import shutil
@@ -89,26 +90,24 @@ def main():
         fields = ["lr_id", "spot_id", pcol, "score", "tested", scol]
         if method == "blisa":
             fields.append("quadrant")
-        paths = {}
         native = folder / "lr_spot.csv"
-        for chunk in read(native, usecols=fields, chunksize=200000):
-            i = chunk.lr_id.map(lr_index).to_numpy()
-            j = chunk.spot_id.map(spot_index).to_numpy()
-            assert not np.isnan(i).any() and not np.isnan(j).any()
-            ok = chunk.tested.eq(True).to_numpy() & np.isfinite(chunk[pcol]) & chunk[scol].notna()
-            hit = ok & chunk[scol].eq(1).to_numpy()
-            available[i, j], selected[i, j] = ok, hit
-            chunk = chunk.rename(columns={scol: "significant", pcol: "bh_adjusted_p_value" if method == "stlearn_bh" else "p_value"})
-            # Significance is defined only for available local tests; unavailable
-            # flags remain NA rather than becoming observed zero results.
-            chunk["significant"] = np.where(ok, hit.astype(int), np.nan)
-            chunk["tested"] = chunk.tested.astype(int)
-            for block, part in chunk.groupby(i // 100, sort=True):
-                path = results / f"{STEMS[method]}_local_lri_results_10000_samples_part{int(block)+1:02d}.csv.gz"
-                first = path not in paths
-                part.to_csv(path, mode="w" if first else "a", header=first, index=False,
-                            na_rep="NA", float_format="%.17g", compression={"method": "gzip", "compresslevel": 6})
-                paths[path] = True
+        target = results / f"{STEMS[method]}_local_lri_results_10000_samples.csv.gz"
+        with gzip.open(target, "wt", compresslevel=6) as handle:
+            first = True
+            for chunk in read(native, usecols=fields, chunksize=200000):
+                i = chunk.lr_id.map(lr_index).to_numpy()
+                j = chunk.spot_id.map(spot_index).to_numpy()
+                assert not np.isnan(i).any() and not np.isnan(j).any()
+                ok = chunk.tested.eq(True).to_numpy() & np.isfinite(chunk[pcol]) & chunk[scol].notna()
+                hit = ok & chunk[scol].eq(1).to_numpy()
+                available[i, j], selected[i, j] = ok, hit
+                chunk = chunk.rename(columns={scol: "significant", pcol: "bh_adjusted_p_value" if method == "stlearn_bh" else "p_value"})
+                # Significance is defined only for available local tests; unavailable
+                # flags remain NA rather than becoming observed zero results.
+                chunk["significant"] = np.where(ok, hit.astype(int), np.nan)
+                chunk["tested"] = chunk.tested.astype(int)
+                chunk.to_csv(handle, header=first, index=False, na_rep="NA", float_format="%.17g")
+                first = False
         selections[method] = selected
         n_available, n_sig = available.sum(axis=1), selected.sum(axis=1)
         local_available = returned & (n_available > 0)
@@ -123,8 +122,7 @@ def main():
             hits = np.where(local_available, selected[:, roi].sum(axis=1), np.nan)
             regional.append(pd.DataFrame(dict(condition=method, lr_id=ids, region=region,
                 n_total=int(roi.sum()), n_sig=hits, proportion=hits / roi.sum(), status=display_status)))
-        for target in paths:
-            record(native, target, f"All native {method} local tests; 100 LR identities per part, 10,000 samples.")
+        record(native, target, f"All native {method} local tests; 10,000 samples.")
         print(f"Imported {method}: {n_available.sum():,} available local tests, {n_sig.sum():,} hotspots", flush=True)
 
     counts = pd.concat(summaries, ignore_index=True)

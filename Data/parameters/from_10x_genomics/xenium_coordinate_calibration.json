@@ -1,0 +1,10 @@
+{
+  "sample_id": "Xenium_FFPE_Human_Breast_Cancer_Rep1",
+  "pixel_size_um": 0.2125,
+  "coordinate_origin": "top_left",
+  "input_units": "Xenium micrometres",
+  "matrix_input_units": "Xenium morphology full-resolution pixels",
+  "matrix_output_units": "Visium full-resolution image pixels",
+  "source_url": "https://cf.10xgenomics.com/supp/xenium/xenium_documentation.html",
+  "provenance": "Transcribed from documentation; not extracted from a downloaded image"
+}

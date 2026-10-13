@@ -4,11 +4,14 @@ Analysis and plotting code for the Xenium, Visium, aligned-platform and
 three-method benchmark analyses. Plotting reads processed inputs and saved
 results and does not run permutation inference.
 
-This GitHub repository currently contains code, documentation and software
-versions only. `Data/` and `res/` are kept locally and excluded from Git, together
-with generated figures and the private methods reference. To reproduce the
-figures, the required data and saved results must first be supplied in the
-working directory shown below; a code-only clone does not contain them.
+This GitHub repository contains code, documentation, software versions and
+selected data/results. Published data includes `Data/data_sources.csv`,
+`Data/parameters/`, `Data/downloaded/`, and CSV/JSON files in `Data/generated/`.
+Published `res/` files are individually smaller than 10,000,000 bytes, using
+compressed file sizes for `.csv.gz` files. Generated RDS inputs and larger
+result files remain local, together with figures and the private methods
+reference. To reproduce all figures, the omitted inputs and results must first
+be supplied in the working directory shown below.
 
 ## Working directory layout
 
@@ -41,14 +44,25 @@ Figures/                   # Regenerated PDFs; excluded from Git
 software_versions.csv
 ```
 
-The local `Data/data_sources.csv` records sources, sizes and SHA-256 checksums. Original
-release objects are linked there and are not duplicated. `Data/generated/`
+`Data/data_sources.csv` records sources, sizes and SHA-256 checksums, including
+files retained only locally. Original release objects are linked there and are
+not duplicated. `Data/generated/`
 contains the actual processed inputs; spatial annotations are inputs, not LRI
 results. `res/` contains CSV analysis results and computation measurements.
-Large complete local-test tables are gzip-compressed CSVs, split at LR boundaries
-where needed. No rows are dropped to reduce their size, and no result RDS is
-required for plotting. Regional coverage and agreement summaries are calculated
-from the complete results when plotting.
+Large complete local-test tables are gzip-compressed CSVs, with one file per
+analysis or method. Results are never split to meet the upload cutoff: files
+of 10,000,000 bytes or more remain local. No rows are dropped to reduce their
+size, and no result RDS is required for plotting. Regional coverage and
+agreement summaries are calculated from the complete results when plotting.
+
+The standalone Visium spot results are stored in
+`res/visium/lri_by_spot.csv.gz`. Each row is one
+LR pair at one spot, including its local test statistics and native hotspot call.
+The three Visium benchmark methods each have a single
+`res/benchmarks/visium/*_local_lri_results_10000_samples.csv.gz` file. These four
+complete tables exceed the upload cutoff and must be supplied locally for
+plotting. `res/visium/lri_summary.csv` contains the separate per-LR summary and
+cannot replace the spot-level results.
 
 ## Reproduce the figures
 

@@ -1,7 +1,8 @@
 # Private manuscript-writing notes.
 /METHODS_writing_reference.md
 
-# Publish code only; keep data and analysis results locally.
+# Publish explicitly selected data/results; keep all other files local.
+# Tracked files remain versioned; new files require an explicit selection.
 /Data/
 /res/
 

@@ -24,20 +24,18 @@ def summarize_saved_results(repo, map_ids=()):
         selected = np.zeros((len(ids), len(spots)), dtype=bool)
         available = np.zeros_like(selected)
         pcol = "bh_adjusted_p_value" if method == "stlearn_bh" else "p_value"
-        paths = sorted(results.glob(f"{STEMS[method]}_local_lri_results_10000_samples_part*.csv.gz"))
-        assert paths, method
-        for path in paths:
-            for chunk in pd.read_csv(path, usecols=["lr_id", "spot_id", pcol, "tested", "significant"], chunksize=200000):
-                i = chunk.lr_id.map(lr_index).to_numpy()
-                j = chunk.spot_id.map(spot_index).to_numpy()
-                ok = chunk.tested.eq(1) & np.isfinite(chunk[pcol]) & chunk.significant.notna()
-                available[i, j] = ok
-                selected[i, j] = ok & chunk.significant.eq(1)
-                shown = chunk[chunk.lr_id.isin(map_ids)].copy()
-                if not shown.empty:
-                    shown["available"] = shown.tested.eq(1) & np.isfinite(shown[pcol]) & shown.significant.notna()
-                    shown["selected"] = shown.available & shown.significant.eq(1)
-                    map_frames.append(shown.rename(columns={pcol: "display_p_value"}))
+        path = results / f"{STEMS[method]}_local_lri_results_10000_samples.csv.gz"
+        for chunk in pd.read_csv(path, usecols=["lr_id", "spot_id", pcol, "tested", "significant"], chunksize=200000):
+            i = chunk.lr_id.map(lr_index).to_numpy()
+            j = chunk.spot_id.map(spot_index).to_numpy()
+            ok = chunk.tested.eq(1) & np.isfinite(chunk[pcol]) & chunk.significant.notna()
+            available[i, j] = ok
+            selected[i, j] = ok & chunk.significant.eq(1)
+            shown = chunk[chunk.lr_id.isin(map_ids)].copy()
+            if not shown.empty:
+                shown["available"] = shown.tested.eq(1) & np.isfinite(shown[pcol]) & shown.significant.notna()
+                shown["selected"] = shown.available & shown.significant.eq(1)
+                map_frames.append(shown.rename(columns={pcol: "display_p_value"}))
         if map_frames:
             for lr, frame in pd.concat(map_frames).groupby("lr_id"):
                 assert frame.spot_id.is_unique
