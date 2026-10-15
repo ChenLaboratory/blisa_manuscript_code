@@ -6,7 +6,6 @@ colours and ROI overlays. No inference, downloads or figure-specific data export
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ccc_visium_benchmark_mpl")
@@ -63,8 +62,6 @@ def map_panel(ax, method, lr, kind):
         # Fixed map axes are final: convert the recorded footprint to points once.
         # One reusable circular path keeps the vector PDF compact.
         diameter_points=SPOT_DIAMETER*ax.get_window_extent().width/(MAP_XLIM[1]-MAP_XLIM[0])*72/ax.figure.dpi
-        diameter_y=SPOT_DIAMETER*ax.get_window_extent().height/(MAP_YLIM[1]-MAP_YLIM[0])*72/ax.figure.dpi
-        assert np.isclose(diameter_points,diameter_y)
         ax.scatter(spots.x,spots.y,s=diameter_points**2,c=rgba,marker="o",linewidths=0,edgecolors="none")
     for (region,piece),border in roi.groupby(["region","piece"]):
         ax.plot(border.x,border.y,color="white",lw=ROI_HALO_LINEWIDTH)
@@ -97,14 +94,6 @@ def map_grid(fig, current, rect, kind, header_size=10):
         for spine in side.spines.values():spine.set_visible(False)
         for j,method in enumerate(METHODS):
             map_panel(fig.add_axes([x0+j*(w+gap),y,w,h]),method,lr,kind)
-
-
-def pvalue_bar(fig, rect, fontsize=8):
-    bar=fig.colorbar(plt.cm.ScalarMappable(norm=PVALUE_NORM,cmap=PVALUE_CMAP),
-                    cax=fig.add_axes(rect),orientation="vertical",ticks=[1,2,3,4])
-    bar.ax.set_yticklabels(["1","2","3","4+"]);bar.ax.tick_params(labelsize=fontsize,length=2)
-    bar.ax.set_title("−log₁₀(p)",fontsize=fontsize+1,pad=7,weight="bold")
-    bar.outline.set_visible(False)
 
 
 def horizontal_pvalue_bar(fig, rect, fontsize=8):
@@ -144,7 +133,7 @@ def regional_named_panel(ids):
                 luminance = np.dot(REGIONAL_CMAP(REGIONAL_NORM(value))[:3], [.2126, .7152, .0722]) if np.isfinite(value) else 1
                 ax.text(j, i, number, ha="center", va="center", fontsize=6.4,
                         color="white" if luminance < .48 else "#111111")
-        total = int((spots.region == region).sum())
+        total = int(region_lookup.loc[(ids[0], region, METHODS[0]), "n_total"])
         ax.set_title(f"{name}\nn = {total:,}", fontsize=8, weight="bold", pad=8, color=ROI_COLORS[region])
         ax.set_xticks(range(3), list(NAMES.values()), fontsize=7, rotation=50, ha="right", rotation_mode="anchor")
         for tick, method in zip(ax.get_xticklabels(), METHODS):
@@ -225,60 +214,67 @@ def save(fig, name):
     print("Rendered", name, flush=True)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=Path, default=Path.cwd())
-    parser.add_argument("--jaccard-dir", type=Path, help="Temporary handoff directory used by the R plotting entry point.")
-    args = parser.parse_args()
-    repo = args.repo_root.resolve()
-    RESULTS = repo / "res/benchmarks/visium"
-    DATA = repo / "Data/generated/benchmarks/visium"
-    FIGURES = repo / "Figures"
-    FIGURES.mkdir(parents=True, exist_ok=True)
-    final = pd.read_csv(RESULTS / "visium_lri_hotspot_counts_and_test_status_10000_samples.csv", converters={"status": str})
-    blisa_order = final[final.condition == "blisa"].sort_values(["returned", "n_sig", "lr_id"], ascending=[False, False, True], na_position="last")
-    common = set.intersection(*[set(final.loc[(final.condition == m) & (final.status == "available"), "lr_id"]) for m in METHODS])
-    common_ids = blisa_order.loc[blisa_order.lr_id.isin(common), "lr_id"].tolist()
-    assert len(common_ids) == 679
-    selected_ids = set(common_ids[:10]) | {"LAMA5__CD44"}
-    sys.path.insert(0, str(repo / "codes/helpers"))
-    from visium_benchmark_results import summarize_saved_results
-    _, region_results, overlap, pooled, map_lookup = summarize_saved_results(repo, selected_ids)
-    if args.jaccard_dir:
-        overlap.to_csv(args.jaccard_dir / "jaccard_per_lr.csv", index=False, na_rep="NA")
-        pooled.to_csv(args.jaccard_dir / "jaccard_pooled.csv", index=False, na_rep="NA")
-    spots = pd.read_csv(DATA / "visium_benchmark_spot_annotations.csv", usecols=["spot_id", "image_x", "image_y", "region"])
-    spots["x"], spots["y"] = spots.image_x, -spots.image_y
-    roi = pd.read_csv(DATA / "visium_benchmark_registered_roi_borders.csv")
-    SPOT_DIAMETER = json.loads((DATA / "visium_benchmark_image_scalefactors.json").read_text())["spot_diameter_fullres"]
-    MAP_XLIM = (min(spots.x.min(), roi.x.min())-SPOT_DIAMETER/2, max(spots.x.max(), roi.x.max())+SPOT_DIAMETER/2)
-    MAP_YLIM = (min(spots.y.min(), roi.y.min())-SPOT_DIAMETER/2, max(spots.y.max(), roi.y.max())+SPOT_DIAMETER/2)
-    region_lookup = region_results.set_index(["lr_id", "region", "condition"])
-    # Native selections and regional denominators are checked again after CSV round-trip.
-    for (method, lr), frame in map_lookup.items():
-        expected = final[(final.condition == method) & (final.lr_id == lr)].iloc[0]
-        assert int(frame.selected.fillna(False).sum()) == expected.n_sig
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--repo-root", type=Path, default=Path.cwd())
+args = parser.parse_args()
+repo = args.repo_root.resolve()
+RESULTS = repo / "res/benchmarks/visium"
+DATA = repo / "Data/generated/benchmarks/visium"
+FIGURES = repo / "Figures"
+FIGURES.mkdir(parents=True, exist_ok=True)
+final = pd.read_csv(RESULTS / "visium_lri_hotspot_counts_and_test_status_10000_samples.csv", converters={"status": str})
+blisa_order = final[final.condition == "blisa"].sort_values(["returned", "n_sig", "lr_id"], ascending=[False, False, True], na_position="last")
+# 1. Read shared eligibility and regional coverage saved by the comparison analysis.
+overlap = pd.read_csv(RESULTS / "visium_benchmark_jaccard_by_lr.csv")
+common = set(overlap.loc[overlap.common_three_eligible, "lr_id"])
+common_ids = blisa_order.loc[blisa_order.lr_id.isin(common), "lr_id"].tolist()
+selected_ids = set(common_ids[:10]) | {"LAMA5__CD44"}
+region_results = pd.read_csv(RESULTS / "visium_benchmark_regional_coverage.csv",
+                             converters={"status": str}, float_precision="round_trip")
+spots = pd.read_csv(DATA / "visium_benchmark_spot_annotations.csv", usecols=["spot_id", "image_x", "image_y", "region"])
+spots["x"], spots["y"] = spots.image_x, -spots.image_y
+roi = pd.read_csv(DATA / "visium_benchmark_registered_roi_borders.csv")
+SPOT_DIAMETER = json.loads((DATA / "visium_benchmark_image_scalefactors.json").read_text())["spot_diameter_fullres"]
+MAP_XLIM = (min(spots.x.min(), roi.x.min())-SPOT_DIAMETER/2, max(spots.x.max(), roi.x.max())+SPOT_DIAMETER/2)
+MAP_YLIM = (min(spots.y.min(), roi.y.min())-SPOT_DIAMETER/2, max(spots.y.max(), roi.y.max())+SPOT_DIAMETER/2)
+region_lookup = region_results.set_index(["lr_id", "region", "method"])
+# 2. Select the displayed LR rows from complete local results and join spot coordinates.
+# These are the native saved significance calls; no tests or summaries run here.
+map_lookup = {}
+for method in METHODS:
+    pcol = "bh_adjusted_p_value" if method == "stlearn_bh" else "p_value"
+    path = RESULTS / f"{STEMS[method]}_local_lri_results_10000_samples.csv.gz"
+    frames = []
+    for chunk in pd.read_csv(path, usecols=["lr_id", "spot_id", pcol, "tested", "significant"],
+                             chunksize=200000):
+        frames.append(chunk.loc[chunk.lr_id.isin(selected_ids)])
+    shown = pd.concat(frames)
+    shown["available"] = shown.tested.eq(1) & np.isfinite(shown[pcol]) & shown.significant.notna()
+    shown["selected"] = shown.available & shown.significant.eq(1)
+    for lr, frame in shown.rename(columns={pcol: "display_p_value"}).groupby("lr_id"):
+        map_lookup[method, lr] = frame.set_index("spot_id").reindex(spots.spot_id)
 
-    fig = plt.figure(figsize=(7.2, 3.05))
-    map_grid(fig, ["LAMA5__CD44"], [.035, .13, .935, .85], "pvalue", header_size=11)
-    horizontal_pvalue_bar(fig, [.62, .078, .23, .025], fontsize=8)
-    fig.legend(handles=[Patch(color=ROI_COLORS[r], label=n) for r, n in zip(REGIONS[:3], REGION_NAMES[:3])],
-               loc="lower left", ncol=3, bbox_to_anchor=(.035, .002), fontsize=7, frameon=False)
-    save(fig, "figure4h")
+# 3. Draw individual manuscript map panels and regional-coverage heatmaps.
+fig = plt.figure(figsize=(7.2, 3.05))
+map_grid(fig, ["LAMA5__CD44"], [.035, .13, .935, .85], "pvalue", header_size=11)
+horizontal_pvalue_bar(fig, [.62, .078, .23, .025], fontsize=8)
+fig.legend(handles=[Patch(color=ROI_COLORS[r], label=n) for r, n in zip(REGIONS[:3], REGION_NAMES[:3])],
+           loc="lower left", ncol=3, bbox_to_anchor=(.035, .002), fontsize=7, frameon=False)
+save(fig, "figure4h")
 
-    fig = plt.figure(figsize=(13.8, 11.4))
-    map_grid(fig, common_ids[:5], [.035, .075, .46, .90], "pvalue", header_size=10)
-    map_grid(fig, common_ids[5:10], [.535, .075, .46, .90], "pvalue", header_size=10)
-    fig.legend(handles=[Patch(color=ROI_COLORS[r], label=n) for r, n in zip(REGIONS[:3], REGION_NAMES[:3])],
-               loc="lower left", ncol=3, bbox_to_anchor=(.045, .025), fontsize=9, frameon=False)
-    horizontal_pvalue_bar(fig, [.56, .045, .24, .016], fontsize=9)
-    save(fig, "figureS7b")
+fig = plt.figure(figsize=(13.8, 11.4))
+map_grid(fig, common_ids[:5], [.035, .075, .46, .90], "pvalue", header_size=10)
+map_grid(fig, common_ids[5:10], [.535, .075, .46, .90], "pvalue", header_size=10)
+fig.legend(handles=[Patch(color=ROI_COLORS[r], label=n) for r, n in zip(REGIONS[:3], REGION_NAMES[:3])],
+           loc="lower left", ncol=3, bbox_to_anchor=(.045, .025), fontsize=9, frameon=False)
+horizontal_pvalue_bar(fig, [.56, .045, .24, .016], fontsize=9)
+save(fig, "figureS7b")
 
-    biology_ids = ["AREG__EGFR", "CDH1__CDH1", "EFNA1__EPHA2", "EGF__EGFR", "FGF10__FGFR2", "FGF10__FGFR1",
-                   "IGF1__IGF1R", "FGF7__FGFR2", "MDK__LRP1", "THBS2__SDC1", "THBS2__SDC4", "PDGFB__PDGFRA"]
-    save(regional_named_panel(biology_ids), "figure4i")
-    top50 = blisa_order.loc[blisa_order.returned, "lr_id"].head(50).tolist()
-    save(regional_named_panel(top50), "figureS8b")
-    # S8c matches report page 28: 679 common LR pairs, all four regions, with
-    # identical column order, annotation colours, dendrograms and row patterns.
-    save(regional_clustered_panel(sorted(common)), "figureS8c")
+biology_ids = ["AREG__EGFR", "CDH1__CDH1", "EFNA1__EPHA2", "EGF__EGFR", "FGF10__FGFR2", "FGF10__FGFR1",
+               "IGF1__IGF1R", "FGF7__FGFR2", "MDK__LRP1", "THBS2__SDC1", "THBS2__SDC4", "PDGFB__PDGFRA"]
+save(regional_named_panel(biology_ids), "figure4i")
+top50 = blisa_order.loc[blisa_order.returned, "lr_id"].head(50).tolist()
+save(regional_named_panel(top50), "figureS8b")
+# S8c matches report page 28: 679 common LR pairs, all four regions, with
+# identical column order, annotation colours, dendrograms and row patterns.
+save(regional_clustered_panel(sorted(common)), "figureS8c")

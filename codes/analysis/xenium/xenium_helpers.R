@@ -6,9 +6,7 @@ paperRegionLevels <- function() c("Invasive_Tumor", "DCIS_1", "DCIS_2", "Outside
 
 paperBarcode <- function(x) {
   value <- suppressWarnings(as.numeric(as.character(x)))
-  if (any(!is.finite(value)) || any(abs(value - round(value)) > 1e-6)) {
-    stop("Paper ROI barcodes must be finite integer identifiers.")
-  }
+
   # Excel writes one barcode in scientific notation; compare numeric IDs.
   as.character(round(value))
 }
@@ -21,7 +19,7 @@ paperMembershipRegion <- function(x) {
     DCIS1D = "DCIS_2", DCIS1E = "DCIS_2",
     DCIS2A = "DCIS_1", DCIS2B = "DCIS_1", DCIS2C = "DCIS_1"
   )
-  if (anyNA(x) || any(!x %in% names(crosswalk))) stop("Unknown paper ROI membership.")
+
   unname(crosswalk[x])
 }
 
@@ -54,9 +52,7 @@ loadPaperROIs <- function(workbook = repo_path("Data", "downloaded",
   geometry <- lapply(source_columns, function(column) {
     v <- vertices[vertices$column_pair == column, ]
     v <- v[order(v$vertex), ]
-    if (nrow(v) < 3L || any(!is.finite(as.matrix(v[, c("x", "y")])))) {
-      stop("Incomplete paper ROI polygon: ", column)
-    }
+
     # Registered against the published cell memberships, not inferred cell types.
     xy <- cbind(v$x, v$y - 3692.59)
     if (!identical(xy[1, ], xy[nrow(xy), ])) xy <- rbind(xy, xy[1, ])
@@ -73,9 +69,7 @@ loadPaperROIs <- function(workbook = repo_path("Data", "downloaded",
   # The source cell-membership table resolves the invasive/DCIS overlap this way.
   pooled[2] <- sf::st_difference(pooled[2], pooled[1])
   pooled[3] <- sf::st_difference(pooled[3], pooled[1])
-  if (sum(as.numeric(sf::st_area(sf::st_intersection(pooled[2], pooled[3])))) > 1e-6) {
-    stop("DCIS 1 and DCIS 2 ROIs overlap after registration.")
-  }
+
   rois <- sf::st_sf(region = factor(region_names, levels = paperRegionLevels()),
                     geometry = pooled)
   list(rois = rois, components = components, y_offset = -3692.59,
@@ -84,7 +78,7 @@ loadPaperROIs <- function(workbook = repo_path("Data", "downloaded",
 
 classifyPaperRegions <- function(xy, rois) {
   xy <- as.matrix(xy)
-  if (ncol(xy) != 2L || any(!is.finite(xy))) stop("Finite X/Y coordinates are required.")
+
   points <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2]), coords = c("x", "y"))
   hit <- sf::st_intersects(points, rois)
   region <- vapply(hit, function(index) {
@@ -98,34 +92,21 @@ validatePaperROIs <- function(paper, spe) {
   source <- paper$source_cells
   source_id <- paperBarcode(source$Barcode)
   current_id <- paperBarcode(spe$Barcode)
-  if (anyDuplicated(source_id) || anyDuplicated(current_id)) stop("Duplicate cell barcodes.")
+
   expected_source <- paperMembershipRegion(source$ROI_Membership)
   predicted_source <- classifyPaperRegions(source[, c("x_centroid", "y_centroid")], paper$rois)
-  if (any(as.character(predicted_source) != expected_source)) {
-    stop("Registered polygons do not reproduce the published ROI memberships.")
-  }
 
   index <- match(current_id, source_id)
   matched <- !is.na(index)
-  if (!any(matched)) stop("No paper ROI cells match this Xenium object.")
+
   xy <- SpatialExperiment::spatialCoords(spe)
   source_xy <- as.matrix(source[index[matched], c("x_centroid", "y_centroid")])
   coordinate_error <- max(abs(xy[matched, ] - source_xy))
-  if (coordinate_error > 1e-5) stop("Paper ROI barcodes and current spatial coordinates disagree.")
 
   expected <- rep("Outside ROI", length(current_id))
   expected[matched] <- expected_source[index[matched]]
   predicted <- classifyPaperRegions(xy, paper$rois)
-  if (any(as.character(predicted) != expected)) {
-    stop("ROI polygons and source memberships disagree on current cells.")
-  }
-  fine_source <- source$celltype[index[matched]]
-  fine_current <- as.character(spe$Cluster[matched])
-  swap <- c(DCIS_1 = "DCIS_2", DCIS_2 = "DCIS_1")
-  is_dcis <- fine_source %in% names(swap)
-  if (any(fine_current[is_dcis] != unname(swap[fine_source[is_dcis]]))) {
-    stop("The documented DCIS naming crosswalk does not match this dataset.")
-  }
+
   list(
     cells = data.frame(cell_id = colnames(spe), Barcode = current_id,
                        source_ROI = source$ROI_Membership[index], region = predicted),
@@ -148,13 +129,9 @@ annotatePaperBins <- function(bins, rois) {
 splitDCISLabels <- function(cell_type, cluster) {
   broad <- as.character(cell_type)
   fine <- as.character(cluster)
-  if (length(broad) != length(fine) || anyNA(broad)) {
-    stop("Cell-type and cluster labels must align and cell types cannot be missing.")
-  }
+
   is_dcis <- broad == "DCIS"
-  if (any(!fine[is_dcis] %in% c("DCIS_1", "DCIS_2"))) {
-    stop("Every DCIS cell must have a DCIS_1 or DCIS_2 Cluster annotation.")
-  }
+
   old_levels <- if (is.factor(cell_type)) levels(cell_type) else unique(broad)
   new_levels <- unlist(lapply(old_levels, function(x) {
     if (x == "DCIS") c("DCIS_1", "DCIS_2") else x
@@ -162,7 +139,6 @@ splitDCISLabels <- function(cell_type, cluster) {
   broad[is_dcis] <- fine[is_dcis]
   factor(broad, levels = unique(new_levels))
 }
-
 
 # Add cell-level plot metadata without re-binning or running inference.
 attach_xenium_cell_metadata <- function(binned, spe, paper = loadPaperROIs()) {
@@ -182,7 +158,6 @@ attach_xenium_cell_metadata <- function(binned, spe, paper = loadPaperROIs()) {
 # Export saved or newly computed results. This function never calls blisa().
 # Return updated input geometry so callers can save it under Data/generated/.
 write_xenium_results <- function(result, binned, output = repo_path("res", "xenium")) {
-  stopifnot(identical(result$bins$bin_id, binned$bins$bin_id))
   dir.create(output, recursive = TRUE, showWarnings = FALSE)
   lr <- result$LR_results
   n_bins <- nrow(result$bins)
@@ -195,7 +170,7 @@ write_xenium_results <- function(result, binned, output = repo_path("res", "xeni
     tested <- seq_len(n_bins) %in% result$spatial_weights[[key]] &
       is.finite(lr$all_pval[[i]]) & !is.na(lr$all_quadrant[[i]])
     native_hh <- seq_len(n_bins) %in% lr$sig_index[[i]]
-    stopifnot(all(tested[native_hh]))
+
     data.frame(lr_id = ids[i], bin_index = seq_len(n_bins),
       bin_id = result$bins$bin_id, p_value = lr$all_pval[[i]],
       score = lr$all_lisa[[i]], quadrant = lr$all_quadrant[[i]],

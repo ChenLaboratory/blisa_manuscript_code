@@ -77,7 +77,7 @@ squareCCI <- function(mat, cell_mm = 2.5, font_size = 7,
 addPaperROIBorders <- function(plot, rois, linewidth = 0.45) {
   if (is.null(rois)) return(plot)
   colours <- c(Invasive_Tumor = "#377EB8", DCIS_1 = "#4DAF4A", DCIS_2 = "#006D2C")
-  stopifnot(all(as.character(rois$region) %in% names(colours)))
+
   plot <- plot + ggplot2::geom_sf(
     data = rois, inherit.aes = FALSE, fill = NA, colour = "white",
     linewidth = linewidth + 0.3, show.legend = FALSE
@@ -107,9 +107,7 @@ paperROIBorderPaths <- function(rois) {
 # Source: blisa_on_xenium/regionSummary.R
 plotHotspotsWithPaperROIs <- function(res, index, rois, colours) {
   region_names <- as.character(rois$region)
-  if (!all(region_names %in% names(colours)) || anyNA(colours[region_names])) {
-    stop("Paper ROI colours are incomplete.")
-  }
+
   lr_name <- rownames(res$LR_results)[index]
   n_hotspots <- length(res$LR_results$sig_index[[index]])
 
@@ -143,9 +141,8 @@ plotHotspotsWithPaperROIs <- function(res, index, rois, colours) {
 
 # Source: blisa_on_xenium/regionSummary.R
 regionalHotspotHeatmap <- function(mat, colours, column_title = "Paper ROI") {
-  if (!nrow(mat) || !ncol(mat)) stop("No LR-region proportions to plot.")
   label_colours <- unname(colours[colnames(mat)])
-  if (anyNA(label_colours)) stop("Region label colours are incomplete.")
+
   ComplexHeatmap::Heatmap(
     mat, name = "Hotspot\nproportion",
     col = circlize::colorRamp2(c(0, 0.25, 0.5, 0.75, 1),

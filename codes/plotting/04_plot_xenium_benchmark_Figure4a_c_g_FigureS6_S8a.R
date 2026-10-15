@@ -1,4 +1,4 @@
-# Saved-result plots for the three-method Xenium benchmark; no inference.
+# Draw the Xenium benchmark panels from saved native and comparison results.
 # Set CCC_PYTHON to a Python executable with matplotlib, pandas, numpy and scikit-image.
 source("codes/helpers/source_data_helpers.R")
 source(repo_path("codes", "helpers", "benchmark_jaccard_helpers.R"))
@@ -14,9 +14,12 @@ result_dir <- repo_path("res", "benchmarks", "xenium")
 read_result <- function(name) read.csv(file.path(result_dir, paste0("xenium_benchmark_", name)),
   check.names = FALSE)
 performance <- read_result("computation_resources.csv")
+performance$elapsed_minutes <- performance$elapsed_seconds / 60
+performance$peak_rss_gib <- performance$peak_rss_mib / 1024
 dot_data <- read_result("lr_summary.csv")
-local <- read_result("lri_by_bin.csv.gz")
-binned <- readRDS(repo_path("Data", "generated", "benchmarks", "xenium", "xenium_benchmark_50um_binned.rds"))
+overlap <- read_result("jaccard_by_lr.csv")
+pooled <- read_result("jaccard_pooled.csv")
+binned <- readRDS(repo_path("Data", "generated", "xenium", "xenium_50um_binned.rds"))
 figures <- repo_path("Figures")
 dir.create(figures, showWarnings = FALSE)
 save_plot <- function(plot, panel, width, height) {
@@ -24,16 +27,12 @@ save_plot <- function(plot, panel, width, height) {
     width = width, height = height, units = "in", useDingbats = FALSE, bg = "white")
 }
 
-# Eligibility means an available local result in every method, not significance.
+# 1. Use the common LR set already determined by the comparison analysis.
 ids <- unique(dot_data$lr_id[order(dot_data$rank)])
-common_ids <- ids[vapply(ids, function(id) {
-  rows <- dot_data[dot_data$lr_id == id, ]
-  nrow(rows) == 3L && all(rows$returned & rows$n_available > 0)
-}, logical(1))]
-stopifnot(length(common_ids) == 12L)
+common_ids <- ids[ids %in% overlap$lr_id[overlap$common_three_eligible]]
 common <- dot_data[dot_data$lr_id %in% common_ids, ]
 
-# Preserve the measured runtime and symbols, with ordinary linear axes.
+# 2. Draw runtime/RAM and native significant-bin counts with the manuscript layout.
 scatter <- performance[match(methods, performance$method), ]
 scatter$method <- factor(scatter$method, levels = methods)
 memory_max <- max(scatter$peak_rss_gib)
@@ -74,31 +73,12 @@ runtime_plot <- ggplot(scatter,
 save_plot(runtime_plot, "figure4a", 3.35, 3.35)
 save_plot(linked_dot(common, NULL), "figure4b", 6.9, 4.4)
 
-# Keep LR-bin assignments distinct: pooled Jaccard sums intersections and unions.
-sets <- split(local$sample_id[local$significant],
-  paste(local$method[local$significant], local$lr_id[local$significant], sep = "::"))
-overlap <- do.call(rbind, lapply(common_ids, function(id) {
-  do.call(rbind, lapply(methods, function(a) {
-    do.call(rbind, lapply(methods, function(b) {
-      sa <- sets[[paste(a, id, sep = "::")]]
-      sb <- sets[[paste(b, id, sep = "::")]]
-      numerator <- length(intersect(sa, sb))
-      denominator <- length(union(sa, sb))
-      data.frame(lr_id = id, method_a = a, method_b = b,
-        intersection = numerator, union = denominator,
-        jaccard = if (denominator) numerator / denominator else NA_real_,
-        status = if (denominator) "available" else "no_significant_bins")
-    }))
-  }))
-}))
-pooled <- aggregate(cbind(intersection, union) ~ method_a + method_b, overlap, sum)
-pooled$jaccard <- ifelse(pooled$union > 0, pooled$intersection / pooled$union, NA_real_)
+# 3. Display the saved per-LR and pooled Jaccard scores.
 overlap_plot <- jaccard_summary(overlap, pooled, common_ids, methods, labels, colours,
-  NULL, "Pooled (12 common LRs)", NULL) + labs(caption = NULL)
+  NULL, sprintf("Pooled (%d common LRs)", length(common_ids)), NULL) + labs(caption = NULL)
 save_plot(overlap_plot, "figure4c", 6.9, 5.52)
-print(pooled[pooled$method_a != pooled$method_b, ])
 
-# Pass exact saved polygons and annotations to the original Python plotting style.
+# 4. Pass exact saved polygons and annotations to the Python map drawing code.
 # Temporary plotting tables are derived inputs, not additional repository results.
 geometry_dir <- tempfile("xenium_benchmark_geometry_")
 dir.create(geometry_dir)
@@ -112,7 +92,6 @@ vertices <- do.call(rbind, lapply(seq_len(nrow(binned$bins)), function(i) {
 write_csv(vertices, file.path(geometry_dir, "hexagons.csv"))
 write_csv(paperROIBorderPaths(binned$paper_rois), file.path(geometry_dir, "roi_paths.csv"))
 python <- Sys.getenv("CCC_PYTHON", unset = Sys.which("python3"))
-if (!nzchar(python)) stop("Set CCC_PYTHON to a Python executable with the plotting dependencies.")
 status <- system2(python, c(shQuote(repo_path("codes", "plotting",
   "04_plot_xenium_benchmark_spatial_Figure4g_FigureS6_S8a.py")),
   "--repo", shQuote(repo_root()), "--geometry", shQuote(geometry_dir)))

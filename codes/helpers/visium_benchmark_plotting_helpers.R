@@ -1,7 +1,7 @@
 # Runtime/count layouts extracted from the 12 October 2026 Visium report.
 # These functions draw only; their data are supplied by the plotting entry point.
-runtime_plot <- function(budget=NULL) {
-  shown <- if(is.null(budget)) performance else performance[performance$budget==budget,]
+runtime_plot <- function() {
+  shown <- performance
   memory_max <- max(performance$peak_rss_gib)
   runtime_max <- max(performance$elapsed_minutes,1)
   memory_breaks <- pretty(c(0,memory_max*1.25),n=4)
@@ -22,9 +22,7 @@ runtime_plot <- function(budget=NULL) {
     scale_y_continuous(limits=range(runtime_breaks),
       breaks=runtime_breaks,
       labels=scales::label_comma(),expand=expansion(mult=c(0.035,0.02)))+
-    labs(title=if(is.null(budget)) "Visium: both budgets" else
-      paste0("Visium: ",budget/1000,"k samples"),
-      x="Peak RAM (GiB)",y="Runtime (min)",colour=NULL,shape=NULL,fill=NULL)+
+    labs(x="Peak RAM (GiB)",y="Runtime (min)",colour=NULL,shape=NULL,fill=NULL)+
     guides(colour=guide_legend(nrow=2,byrow=TRUE),
       shape=guide_legend(nrow=2,byrow=TRUE),fill=guide_legend(nrow=2,byrow=TRUE))+
     theme_bw(base_size=11,base_family="sans")+
@@ -36,13 +34,10 @@ runtime_plot <- function(budget=NULL) {
       legend.key.size=grid::unit(0.18,"in"),legend.spacing.x=grid::unit(0.05,"in"),
       legend.margin=margin(0,0,0,0),legend.box.spacing=grid::unit(0.04,"in"),
       plot.margin=margin(4,4,4,4))
-  if(is.null(budget)) p <- p+geom_text(aes(label=paste0(budget/1000,"k"),
-    hjust=ifelse(condition=="spatialdm_permutation",1.8,-1)),
-    size=2.5,vjust=0.5,show.legend=FALSE)
   p
 }
-linked_plot <- function(ids,budget,title,show_names=TRUE) {
-  shown <- counts[counts$budget==budget & counts$lr_id %in% ids,]
+linked_plot <- function(ids,title,show_names=TRUE) {
+  shown <- counts[counts$lr_id %in% ids,]
   shown$method <- factor(shown$condition,levels=methods)
   shown$x <- match(shown$lr_id,ids)
   dot_max <- max(c(1,counts$n_sig[counts$lr_id %in% ids]),na.rm=TRUE)

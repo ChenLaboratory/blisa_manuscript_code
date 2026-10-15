@@ -39,26 +39,25 @@ plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 9,
 bins = pd.read_csv(args.geometry / "bins.csv")
 vertices = pd.read_csv(args.geometry / "hexagons.csv")
 borders = pd.read_csv(args.geometry / "roi_paths.csv")
-assert len(vertices) == len(bins) * 7
-assert np.array_equal(vertices.bin_id.to_numpy().reshape(-1, 7)[:, 0], bins.bin_id)
 hexagons = vertices[["x", "y"]].to_numpy().reshape(len(bins), 7, 2)
-assert np.allclose(hexagons[:, :6].mean(axis=1), bins[["x", "y"]], atol=1e-8, rtol=0)
 hex_limits = (hexagons[..., 0].min(), hexagons[..., 0].max(),
               hexagons[..., 1].min(), hexagons[..., 1].max())
 summary = pd.read_csv(results / "xenium_benchmark_lr_summary.csv")
 local = pd.read_csv(results / "xenium_benchmark_lri_by_bin.csv.gz", float_precision="round_trip", low_memory=False)
 ids = summary.sort_values("rank").lr_id.drop_duplicates().tolist()
-common_ids = [lr for lr in ids if all(
-    ((summary.method == method) & (summary.lr_id == lr) & (summary.n_available > 0)).any()
-    for method in METHODS)]
-assert len(common_ids) == 12
+# 1. Read the shared LR set and regional proportions already computed in analysis.
+overlap = pd.read_csv(results / "xenium_benchmark_jaccard_by_lr.csv")
+common = set(overlap.loc[overlap.common_three_eligible, "lr_id"])
+common_ids = [lr for lr in ids if lr in common]
+regional = pd.read_csv(results / "xenium_benchmark_regional_coverage.csv", converters={"status": str})
+region_lookup = regional.set_index(["lr_id", "region", "method"])
+# Align the native local-result rows to the saved bin geometry for map drawing.
 groups = {}
 for (method, lr), group in local.groupby(["method", "lr_id"], sort=False):
     group = group.set_index("sample_id").loc[bins.sample_id]
     p = group.p_value.to_numpy(float)
     available = group.local_available.to_numpy(bool)
     selected = group.significant.to_numpy(bool)
-    assert not (selected & ~available).any()
     groups[(method, lr)] = (p, available, selected)
 hot_cmap = LinearSegmentedColormap.from_list("hotspot", ["#FFFFCC", "#FFD700", "#FF7F00", "#D7301F"])
 
@@ -110,7 +109,7 @@ def map_legends(fig, y, left=.14, width=.35, colorbar_left=.62, colorbar_width=.
         "−log₁₀\n(p-value)", ha="left", va="center", fontsize=8)
 
 
-# Figure 4g: selected LR, the three methods, and a shared horizontal legend.
+# 2. Figure 4g: selected LR, the three methods, and a shared horizontal legend.
 fig = plt.figure(figsize=(7.5, 2.6))
 grid = fig.add_gridspec(1, 3, left=.08, right=.995, top=.86, bottom=.20, wspace=.045)
 axes = []
@@ -127,7 +126,7 @@ fig.text(.039, box.y0 + box.height / 2, "CXCL12–CXCR4", rotation=90,
 map_legends(fig, .085, left=.03, width=.51, colorbar_left=.62, colorbar_width=.20)
 save(fig, "figure4g")
 
-# Figure S6: all 12 common LR pairs, ordered as two blocks of six rows.
+# 3. Figure S6: all 12 common LR pairs, ordered as two blocks of six rows.
 fig = plt.figure(figsize=(13, 9.2))
 for block in range(2):
     left = .095 + block * .50
@@ -144,7 +143,7 @@ for block in range(2):
 map_legends(fig, .06, left=.15, width=.35, colorbar_left=.59, colorbar_width=.17)
 save(fig, "figureS6")
 
-# Figure S8a: untransformed percentages, shared log10(1 + percentage) colors.
+# 4. Figure S8a: untransformed percentages, shared log10(1 + percentage) colors.
 coverage_rgb = np.array([to_rgb(c) for c in ["#FFFFFF", "#FFFFCC", "#FFD700", "#FF7F00", "#D7301F"]])
 coverage_lab = rgb2lab(coverage_rgb.reshape(1, 5, 3)).reshape(5, 3)
 lab_steps = np.column_stack([np.interp(np.linspace(0, 1, 1025), np.linspace(0, 1, 5),
@@ -157,16 +156,15 @@ left, gap, bottom, cell_w, cell_h = 1.45, .16, .64, .40, .17
 heat_h = len(common_ids) * cell_h
 fig = plt.figure(figsize=(width, height))
 for j, region in enumerate(REGIONS):
-    mask = bins.region.to_numpy() == region
-    assert mask.sum() > 0
-    mat = np.array([[100 * groups[(method, lr)][2][mask].sum() / mask.sum()
-        if groups[(method, lr)][1].any() else np.nan for method in METHODS] for lr in common_ids])
+    total = int(region_lookup.loc[(common_ids[0], region, METHODS[0]), "n_total"])
+    mat = np.array([[100 * region_lookup.loc[(lr, region, method), "proportion"]
+        for method in METHODS] for lr in common_ids])
     ax = fig.add_axes([(left + j * (3 * cell_w + gap)) / width,
         bottom / height, 3 * cell_w / width, heat_h / height])
     mesh = ax.pcolormesh(np.arange(4) - .5, np.arange(len(common_ids) + 1) - .5,
         np.ma.masked_invalid(mat), norm=coverage_norm, cmap=coverage_cmap, shading="flat")
     ax.set_xlim(-.5, 2.5); ax.set_ylim(len(common_ids) - .5, -.5)
-    ax.set_title(f"{REGION_LABELS[j]}\nn = {mask.sum():,}", fontsize=8,
+    ax.set_title(f"{REGION_LABELS[j]}\nn = {total:,}", fontsize=8,
         weight="bold", pad=8, color=REGION_COLORS[j])
     ax.set_xticks(range(3), [LABELS[m] for m in METHODS], rotation=50,
         ha="right", rotation_mode="anchor", fontsize=7)

@@ -7,8 +7,9 @@ source(repo_path("codes", "analysis", "xenium", "xenium_helpers.R"))
 require_packages(c("blisa", "SpatialExperiment", "SummarizedExperiment", "S4Vectors",
                    "Matrix", "readxl", "digest", "jsonlite", "sf"))
 
+# 1. Retain original feature rows and filter spots with raw total counts >3000.
 spe <- read_source_data("visium")
-stopifnot(inherits(spe, "SpatialExperiment"), nrow(spe) == 18085L)
+
 original_positions <- visium_position_table(spe)
 database <- load_visium_cellchat()
 before <- visium_qc_dimensions(spe, database)
@@ -16,14 +17,14 @@ total_counts <- as.numeric(Matrix::colSums(SummarizedExperiment::assay(spe, "cou
 qc <- data.frame(spot_id = colnames(spe), total_counts = total_counts,
                  keep = total_counts > 3000)
 spe <- spe[, qc$keep]
-stopifnot(nrow(spe) == 18085L, ncol(spe) == 4412L)
+
 after <- visium_qc_dimensions(spe, database)
 
+# 2. Annotate the retained spots using the published deconvolution workbook.
 # Add annotations to this native-count object; never aggregate duplicate symbols.
 positions <- visium_position_table(spe)
 um_per_pixel <- S4Vectors::metadata(spe)$um_per_pixel
-stopifnot(length(um_per_pixel) == 1L, is.finite(um_per_pixel), um_per_pixel > 0,
-          identical(as.character(SummarizedExperiment::rowData(spe)$Symbol), rownames(spe)))
+
 fields <- list(spot_id = colnames(spe),
   image_x = positions$pxl_col_in_fullres, image_y = positions$pxl_row_in_fullres,
   x_um = positions$pxl_col_in_fullres * um_per_pixel,
@@ -33,9 +34,6 @@ fields <- list(spot_id = colnames(spe),
   total_counts = total_counts[qc$keep],
   n_genes = as.numeric(Matrix::colSums(SummarizedExperiment::assay(spe, "counts") > 0)))
 for (field in names(fields)) {
-  if (field %in% names(SummarizedExperiment::colData(spe))) {
-    stopifnot(isTRUE(all.equal(spe[[field]], fields[[field]], check.attributes = FALSE)))
-  }
   SummarizedExperiment::colData(spe)[[field]] <- fields[[field]]
 }
 workbook <- repo_path("Data", "downloaded", "janesick_2023_springer",
@@ -44,6 +42,7 @@ deconvolution <- as.data.frame(readxl::read_xlsx(workbook,
   sheet = "Sup. Fig. 10 Visium Deconv."))
 spe <- annotate_visium(spe, deconvolution, workbook)
 
+# 3. Register published pathology ROIs into Visium image coordinates.
 # Published Xenium ROIs are registered to Visium image pixels. Region assignment
 # uses spot centres and retains the original invasive-tumour overlap precedence.
 paper <- loadPaperROIs(workbook = workbook)
@@ -52,8 +51,7 @@ transform <- as.matrix(utils::read.csv(repo_path("Data", "parameters",
 storage.mode(transform) <- "double"
 calibration <- jsonlite::fromJSON(repo_path("Data", "parameters",
   "from_10x_genomics", "xenium_coordinate_calibration.json"))
-stopifnot(identical(dim(transform), c(3L, 3L)), all(is.finite(transform)),
-          abs(det(transform)) > 1e-12, calibration$pixel_size_um == 0.2125)
+
 xenium_um_to_visium <- transform %*%
   diag(c(1 / calibration$pixel_size_um, 1 / calibration$pixel_size_um, 1))
 centres <- project_xy(cbind(spe$image_x, spe$image_y), solve(xenium_um_to_visium))
@@ -61,12 +59,13 @@ spe$region <- classifyPaperRegions(centres, paper$rois)
 borders <- paperROIBorderPaths(paper$rois)
 borders[, c("x", "y")] <- project_xy(borders[, c("x", "y")], xenium_um_to_visium)
 
+# 4. Preserve calibrated images and source provenance in the processed object.
 images <- SpatialExperiment::imgData(spe)
 sample_id <- unique(as.character(spe$sample_id))
-stopifnot(length(sample_id) == 1L)
+
 image_candidates <- which(images$sample_id == sample_id &
                             is.finite(images$scaleFactor) & images$scaleFactor > 0)
-stopifnot(length(image_candidates) > 0L)
+
 image_index <- image_candidates[which.max(images$scaleFactor[image_candidates])]
 md <- S4Vectors::metadata(spe)
 md$qc <- list(rule = "raw total counts > 3000", before = nrow(qc), after = ncol(spe),

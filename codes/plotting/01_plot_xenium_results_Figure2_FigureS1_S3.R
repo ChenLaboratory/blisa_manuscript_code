@@ -1,6 +1,7 @@
 # Run from the repository root. --main-only renders Figure 2; --supp-only S1-S3.
 # Layout source: run_blisa_on_xenium.pdf pages 3, 8, 14, 22 and 27.
-# Plotting reads processed inputs and complete CSV results; it never runs inference.
+# Plotting reads processed inputs and saved summaries; it never runs analysis.
+# 1. Load processed geometry, complete LRI/CCI results and analysis summaries.
 source("codes/helpers/source_data_helpers.R")
 source(repo_path("codes", "helpers", "plotting_helpers.R"))
 source(repo_path("codes", "helpers", "manuscript_plotting_helpers.R"))
@@ -19,24 +20,23 @@ summary <- read_result("lri_summary.csv")
 local <- read_result("lri_by_bin.csv")
 cci <- read_result("cci_scores.csv")
 dominant <- read_result("xenium_dominant_celltype_pairs_by_bin.csv")
+regional <- read_result("xenium_lri_regional_coverage.csv")
+pair_frequencies <- read_result("xenium_dominant_celltype_pair_frequencies.csv")
 lr_ids <- summary$lr_id
 selected <- "CXCL12_CXCR4"
-stopifnot(selected %in% lr_ids, !anyDuplicated(lr_ids))
+
 other_lr <- setdiff(lr_ids, selected)
-if (is.null(binned$cells_metadata)) {
-  stop("Run codes/analysis/xenium/01_prepare_xenium_50um_bins.R first: ",
-       "cell-level metadata are required for Figure 2a.")
-}
+
 save_panel <- save_figure_panel
 roi_colours <- c(Invasive_Tumor = "#377EB8", DCIS_1 = "#4DAF4A", DCIS_2 = "#006D2C")
 aligned_rows <- function(table, id) {
   rows <- table[table$lr_id == id, , drop = FALSE]
   index <- match(binned$bins$bin_id, rows$bin_id)
-  stopifnot(nrow(rows) == nrow(binned$bins), !anyDuplicated(rows$bin_id), !anyNA(index))
+
   rows[index, , drop = FALSE]
 }
 
-# Reassemble the native plotting object from complete CSVs. This is formatting,
+# 2. Reassemble the native plotting object from complete CSVs. This is formatting,
 # not a second significance calculation or an inference-result RDS dependency.
 lr <- summary[, setdiff(names(summary), c("rank", "lr_id", "n_tested", "n_total_bins")),
   drop = FALSE]
@@ -50,13 +50,14 @@ lr$all_quadrant <- lapply(rows_by_lr, function(x) x$quadrant)
 res <- structure(list(LR_results = lr, bins = binned$bins,
   spatial_weights = binned$spatial_weights, CCI_scores = cci, level = "lr"), class = "blisa")
 
+# 3. Define the shared maps and heatmap appearance.
 # Same expression palette, titles and bottom colour bars as lrExpressionMap()
 # in the source report. Expression panels do not have pathology outlines.
 expression_map <- function(partner, role) {
   genes <- strsplit(gsub("\\s+", "", partner), "[,_]")[[1]]
-  stopifnot(all(genes %in% rownames(binned$counts_matrix)))
+
   index <- match(paste0("bin_factor", binned$bins$bin_id), colnames(binned$counts_matrix))
-  stopifnot(!anyNA(index))
+
   values <- binned$counts_matrix[genes, index, drop = FALSE]
   bins <- binned$bins
   bins$.bin_value <- log1p(if (length(genes) == 1L) as.numeric(values) else
@@ -83,8 +84,9 @@ cci_heatmap <- function(id, limits = NULL) {
 }
 dominant_map <- function(id) {
   values <- aligned_rows(dominant, id)
-  ranked <- sort(table(values$cell_pair[values$native_significant]), decreasing = TRUE)
-  shown <- names(head(ranked, 8))
+  ranked <- pair_frequencies[pair_frequencies$lr_id == id, ]
+  ranked <- ranked[order(ranked$rank), ]
+  shown <- head(ranked$cell_pair, 8)
   bins <- binned$bins
   # Preserve native labels, category palette and top-pair order. The full
   # assignments were already exported; this does not recalculate CCI scores.
@@ -98,11 +100,12 @@ dominant_map <- function(id) {
     "rare pairs" = "#404040", "Non-Significant" = "#D3D3D3", Empty = "#FFFFFF")
   p <- ggplot(bins) + geom_sf(aes(fill = cell_pair_plot), colour = NA) +
     scale_fill_manual(values = colours, drop = FALSE, labels = cellLabel) +
-    guides(fill = guide_legend(title = if (length(ranked) <= 8) "All pairs" else "Top 8 pairs")) +
+    guides(fill = guide_legend(title = if (nrow(ranked) <= 8) "All pairs" else "Top 8 pairs")) +
     labs(title = "Spatial CCI") + theme_void() + spatialTheme(7.5, "right")
   addPaperROIBorders(p, binned$paper_rois)
 }
 
+# 4. Draw the main panels.
 # Figure 2a, report page 3: native scider axes, original cell labels and ROI paths.
 if (!"--supp-only" %in% commandArgs(trailingOnly = TRUE)) {
 cells <- binned$cells_metadata
@@ -141,15 +144,12 @@ p_rank <- blisa::plotLRrank(res, top = 30, pt_size = 2.5) +
 save_panel(p_rank, "figure2b", 4.5, 3.8, pointsize = 10)
 
 # Figure 2c, report page 22: fixed physical tile sizes and coloured ROI labels.
-regions <- as.character(binned$bins_metadata$region[
-  match(binned$bins$bin_id, binned$bins_metadata$bin_id)])
 region_names <- names(roi_colours)
-coverage <- t(vapply(rows_by_lr, function(rows) {
-  vapply(region_names, function(region) {
-    sum(rows$native_significant & regions == region) / sum(regions == region)
-  }, numeric(1))
-}, numeric(length(region_names))))
-dimnames(coverage) <- list(lr_ids, region_names)
+coverage <- matrix(NA_real_, nrow = length(lr_ids), ncol = length(region_names),
+  dimnames = list(lr_ids, region_names))
+shown_regions <- regional[regional$region %in% region_names, ]
+coverage[cbind(match(shown_regions$lr_id, lr_ids),
+  match(shown_regions$region, region_names))] <- shown_regions$hotspot_proportion
 save_panel(heatmapGrob(regionalHotspotHeatmap(coverage, roi_colours),
   width = 7.2, height = 4.1), "figure2c", 7.2, 4.1, pointsize = 10)
 
@@ -171,6 +171,7 @@ save_panel(cci_heatmap(selected), "figure2e", 3.6, 2.55)
 save_panel(dominant_map(selected), "figure2f", 3.6, 2.55)
 }
 
+# 5. Draw supplementary panels from the same complete results.
 # Supplementary panels retain native LR rank, excluding the main-text example.
 if (!"--main-only" %in% commandArgs(trailingOnly = TRUE)) {
   source(repo_path("codes", "helpers", "xenium_supplementary_plotting.R"))

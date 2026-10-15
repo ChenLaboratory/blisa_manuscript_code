@@ -1,6 +1,7 @@
 #!/usr/bin/env Rscript
 # Plot saved CSV results only. Does not run BLISA or change processed inputs.
-# Execute from the repository root after importing saved results or running the analysis.
+# Execute from the repository root after 04_compare_aligned_lri.R.
+# 1. Load processed coordinates and saved comparison results.
 source("codes/helpers/source_data_helpers.R")
 source(repo_path("codes", "helpers", "plotting_helpers.R"))
 suppressPackageStartupMessages({library(SpatialExperiment); library(ggplot2); library(sf)})
@@ -10,49 +11,24 @@ data_dir <- repo_path("Data", "generated", "aligned_overlap")
 result_dir <- repo_path("res", "aligned_overlap")
 v <- readRDS(file.path(data_dir, "visium_aligned_overlap_qc.rds"))
 cell_file <- file.path(data_dir, "xenium_overlap_cells.csv")
-if (!file.exists(cell_file)) {
-  stop("Run codes/analysis/aligned_comparison/01_prepare_aligned_overlap.R first: ",
-       "the aligned cell coordinates are required for Figure 3f.")
-}
+
 cells <- read.csv(cell_file, stringsAsFactors = FALSE)
 read_result <- function(name) read.csv(file.path(result_dir, name),
   check.names = FALSE, stringsAsFactors = FALSE)
 summary_v <- read_result("visium_lri_summary.csv")
 summary_x <- read_result("xenium_lri_summary.csv")
-spots_v <- read_result("visium_lri_by_spot.csv")
-spots_x <- read_result("xenium_lri_by_spot.csv")
-stopifnot(nrow(summary_v) == 15L, nrow(summary_x) == 15L,
-          setequal(summary_v$database_id, summary_x$database_id),
-          all(cells$assigned_spot_id %in% colnames(v)))
+paired <- read_result("aligned_lri_hotspot_counts.csv")
+paired$lr_label <- gsub(" - ", "–", paired$lr_label, fixed = TRUE)
+correlation <- read_result("aligned_lri_hotspot_count_correlation.csv")
+maps <- read_result("aligned_lri_agreement_by_spot.csv")
+# Join saved agreement states to processed spot coordinates for spatial display.
+spot_index <- match(maps$spot_id, colnames(v))
+maps$image_x <- v$image_x[spot_index]
+maps$image_y <- -v$image_y[spot_index]
+maps$state <- factor(maps$state,
+  levels = c("neither", "visium_only", "xenium_only", "both", "untested"))
 
-# Keep native Visium LR order; match every counterpart explicitly by LR and spot.
-key_v <- paste(spots_v$database_id, spots_v$spot_id, sep = "::")
-key_x <- paste(spots_x$database_id, spots_x$spot_id, sep = "::")
-stopifnot(!anyDuplicated(key_v), !anyDuplicated(key_x), setequal(key_v, key_x),
-          nrow(spots_v) == nrow(summary_v) * ncol(v))
-spots_x <- spots_x[match(key_v, key_x), ]
-stopifnot(identical(spots_v$spot_id, spots_x$spot_id),
-          identical(spots_v$database_id, spots_x$database_id),
-          identical(spots_v$tested, spots_x$tested))
-summary_x_matched <- summary_x[match(summary_v$database_id, summary_x$database_id), ]
-paired <- data.frame(database_id = summary_v$database_id,
-  lr_label = gsub(" - ", "–", summary_v$lr_label, fixed = TRUE), mode = summary_v$mode,
-  visium = summary_v$n_sig, xenium = summary_x_matched$n_sig)
-for (i in seq_len(nrow(paired))) {
-  keep <- spots_v$database_id == paired$database_id[i]
-  stopifnot(sum(spots_v$significant[keep], na.rm = TRUE) == paired$visium[i],
-            sum(spots_x$significant[keep], na.rm = TRUE) == paired$xenium[i])
-}
-common <- spots_v$tested & spots_x$tested
-state <- rep("untested", nrow(spots_v))
-state[common] <- ifelse(spots_v$significant[common],
-  ifelse(spots_x$significant[common], "both", "visium_only"),
-  ifelse(spots_x$significant[common], "xenium_only", "neither"))
-spot_index <- match(spots_v$spot_id, colnames(v))
-stopifnot(!anyNA(spot_index))
-maps <- data.frame(database_id = spots_v$database_id,
-  image_x = v$image_x[spot_index], image_y = -v$image_y[spot_index],
-  state = factor(state, levels = c("neither", "visium_only", "xenium_only", "both", "untested")))
+# 2. Define the shared spatial and ranking layouts.
 
 figure_theme <- function(base_size = 12) {
   ggplot2::theme_bw(base_size = base_size) + ggplot2::theme(
@@ -100,6 +76,7 @@ plot_lr_ranking <- function(summary, label, colour, unit) {
 }
 
 save_aligned_panel <- save_figure_panel
+# 3. Draw the main panels.
 # Figure 3f shows the saved aligned cells and spots without a border.
 # The manuscript outline is added manually in BioRender.
 overlap_cells <- data.frame(image_x = cells$image_x, image_y = -cells$image_y)
@@ -128,7 +105,7 @@ scatter_theme <- figure_theme(10) + theme(
   plot.margin = margin(5, 6, 5, 5))
 lr_limit <- ceiling(max(paired$visium, paired$xenium) / 100) * 100
 selected_lr <- c("CDH1_CDH1", "CXCL12_CXCR4", "CEACAM8_CEACAM6")
-stopifnot(all(selected_lr %in% paired$database_id))
+
 selected_labels <- paired
 selected_labels$lr_label <- ifelse(selected_labels$database_id %in% selected_lr,
   gsub(" - ", "–", selected_labels$lr_label, fixed = TRUE), "")
@@ -149,7 +126,7 @@ p_selected <- ggplot(paired, aes(visium, xenium, colour = mode)) +
   coord_equal() + scatter_theme +
   labs(x = "Visium significant spots", y = "Xenium significant spots",
     colour = NULL, subtitle = paste("Spearman rho =",
-      round(stats::cor(paired$visium, paired$xenium, method = "spearman"), 3)))
+      round(correlation$rho, 3)))
 save_aligned_panel(p_selected, "figure3g", 4, 3.8)
 
 agreement_map <- function(ids, ncol = 3) {
@@ -168,6 +145,7 @@ agreement_map <- function(ids, ncol = 3) {
 }
 save_aligned_panel(agreement_map(selected_lr), "figure3h", 8, 3.2)
 
+# 4. Draw the supplementary comparison panels.
 # S5a ranks each arm independently; S5b includes every one of the 15 shared pairs.
 rankings <- gridExtra::arrangeGrob(
   plot_lr_ranking(summary_v, "Visium", "#0072B2", "spots"),

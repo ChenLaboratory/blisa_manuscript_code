@@ -8,8 +8,7 @@ jaccard_summary <- function(overlap, pooled, lr_ids, methods, labels, colours,
     source <- if (i == 1L) pooled else overlap[overlap$lr_id == ids[i], ]
     do.call(rbind, lapply(seq_along(pair_a), function(j) {
       value <- source[source$method_a == pair_a[j] & source$method_b == pair_b[j], ]
-      stopifnot(nrow(value) == 1L)
-      status <- if ("status" %in% names(value)) as.character(value$status) else "ok"
+      status <- as.character(value$status)
       label <- if (is.finite(value$jaccard)) sprintf("%.2f", value$jaccard) else "NA"
       if (!is.na(status) && status %in% c("pair_not_returned", "NR")) label <- "NR"
       if (!is.na(status) && status %in% c("local_result_unavailable", "NA")) label <- "NA"

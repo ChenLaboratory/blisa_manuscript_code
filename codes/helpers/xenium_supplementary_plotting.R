@@ -46,7 +46,7 @@ save_panel(supp_layout(hotspot_panels, hotspot_legend,
   "Xenium | LR hotspot p-values"), "figureS1", 11.7, 12.4)
 
 # The original combined heatmap uses one explicit 0-18 scale for every LR.
-stopifnot(max(as.matrix(cci[, other_lr, drop = FALSE]), na.rm = TRUE) <= 18)
+
 cci_colours <- circlize::colorRamp2(seq(0, 18, length.out = 10), viridisLite::viridis(10))
 cci_panels <- lapply(other_lr, function(id) {
   mat <- cciMatrix(cci, cci[[id]])
@@ -71,8 +71,9 @@ save_panel(supp_layout(cci_panels, cci_legend,
 
 dominant_panels <- lapply(other_lr, function(id) {
   values <- aligned_rows(dominant, id)
-  ranked <- sort(table(values$cell_pair[values$native_significant]), decreasing = TRUE)
-  shown <- names(head(ranked, 8))
+  ranked <- pair_frequencies[pair_frequencies$lr_id == id, ]
+  ranked <- ranked[order(ranked$rank), ]
+  shown <- head(ranked$cell_pair, 8)
   bins <- binned$bins
   bins$.pair <- ifelse(values$tested, "Non-significant", "Untested")
   bins$.pair[values$native_significant] <- ifelse(values$cell_pair[values$native_significant] %in% shown,

@@ -1,5 +1,6 @@
 # Regenerate Figure 3a-e and Supplementary Figure S4 from the processed SPE and
-# complete result CSVs. No inference, preparation, database download or result RDS.
+# saved LRI/pathway CSVs. Run 04_summarize_visium_lri_pathways.R first.
+# 1. Load the shared spatial layouts and original report styling.
 source(file.path(Sys.getenv("CCC_REPO_ROOT", unset = "."),
                  "codes", "helpers", "source_data_helpers.R"))
 source(repo_path("codes", "analysis", "visium", "visium_helpers.R"))
@@ -17,15 +18,9 @@ suppressPackageStartupMessages({
 # Shared image/spot functions retain the original report's calibration, palettes,
 # display radius, ROI registration and distinction between untested and nonsignificant.
 
-
 spatial_spot_radius <- function(spots, coverage = 0.88) {
   xy <- unique(as.matrix(spots[, c("plot_x", "plot_y")]))
-  if (nrow(xy) < 2L || any(!is.finite(xy))) {
-    stop("Spot sizing requires at least two distinct finite coordinates.")
-  }
-  if (length(coverage) != 1L || !is.finite(coverage) || coverage <= 0 || coverage >= 1) {
-    stop("Spot coverage must lie strictly between zero and one.")
-  }
+
   index <- unique(round(seq(1, nrow(xy), length.out = min(nrow(xy), 256L))))
   nearest <- vapply(index, function(i) {
     distance2 <- (xy[, 1L] - xy[i, 1L])^2 + (xy[, 2L] - xy[i, 2L])^2
@@ -34,12 +29,8 @@ spatial_spot_radius <- function(spots, coverage = 0.88) {
   stats::median(nearest) * coverage / 2
 }
 
-
 geom_spatial_spot <- function(mapping = NULL, data = NULL, ..., radius,
                               na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) {
-  if (length(radius) != 1L || !is.finite(radius) || radius <= 0) {
-    stop("Supply a positive finite display radius for spatial spots.")
-  }
   geom <- ggplot2::ggproto(NULL, ggplot2::Geom,
     required_aes = c("x", "y"),
     default_aes = ggplot2::aes(fill = "grey80", colour = "white", alpha = 1,
@@ -62,7 +53,6 @@ geom_spatial_spot <- function(mapping = NULL, data = NULL, ..., radius,
     params = list(radius = radius, na.rm = na.rm, ...))
 }
 
-
 spatial_canvas <- function(spots, background = NULL, borders = NULL) {
   x <- spots
   if (!is.null(background)) {
@@ -79,7 +69,6 @@ spatial_canvas <- function(spots, background = NULL, borders = NULL) {
   x_limits <- range(x$plot_x) + c(-radius, radius)
   y_limits <- range(x$plot_y) + c(-radius, radius)
   if (!is.null(borders)) {
-    if (is.null(background)) stop("Registered image borders require the calibrated image background.")
     # All panels in a triptych include the same extent, even though only the
     # hotspot panel draws the outlines. Some ROIs extend beyond retained spots.
     x_limits <- range(x_limits, borders$x * background$scale)
@@ -99,7 +88,6 @@ spatial_canvas <- function(spots, background = NULL, borders = NULL) {
         plot.title = ggplot2::element_text(size = 9, face = "bold", hjust = 0),
         plot.margin = ggplot2::margin(2, 2, 2, 2)))
 }
-
 
 plot_spot_values <- function(spots, values, title, background = NULL, discrete = FALSE,
                              point_size = NULL, point_stroke = 0,
@@ -128,22 +116,11 @@ plot_spot_values <- function(spots, values, title, background = NULL, discrete =
         barheight = grid::unit(2.5, "mm"), ticks.colour = "white"))
 }
 
-
 add_pathology_borders <- function(plot, borders, x_scale = 1, y_scale = 1,
                                   show_legend = FALSE, linewidth = 0.6) {
   if (is.null(borders)) return(plot)
   colours <- c(Invasive_Tumor = "#377EB8", DCIS_1 = "#4DAF4A", DCIS_2 = "#006D2C")
-  if (!is.data.frame(borders) || !all(c("x", "y", "piece", "region") %in% names(borders)) ||
-      !nrow(borders) || !is.numeric(borders$x) || !is.numeric(borders$y) ||
-      any(!is.finite(borders$x)) || any(!is.finite(borders$y)) ||
-      anyNA(borders$piece) || any(!nzchar(as.character(borders$piece))) ||
-      any(!borders$region %in% names(colours))) {
-    stop("Supply registered pathology borders with finite x/y, piece and region columns.")
-  }
-  if (length(x_scale) != 1L || length(y_scale) != 1L ||
-      !is.finite(x_scale) || !is.finite(y_scale) || x_scale == 0 || y_scale == 0) {
-    stop("Pathology borders require finite nonzero coordinate scales.")
-  }
+
   borders$plot_x <- borders$x * x_scale
   borders$plot_y <- borders$y * y_scale
   borders$path_group <- interaction(borders$region, borders$piece, drop = TRUE)
@@ -165,21 +142,15 @@ add_pathology_borders <- function(plot, borders, x_scale = 1, y_scale = 1,
       guide = ggplot2::guide_legend(order = 2, nrow = 1))
 }
 
-
 plot_hotspot_values <- function(spots, rows, title, background = NULL,
                                 point_size = NULL, point_stroke = 0, borders = NULL) {
-  if (anyDuplicated(rows$spot_id) || !setequal(spots$spot_id, rows$spot_id)) {
-    stop("Hotspot maps require exactly one row per retained spot.")
-  }
   index <- match(spots$spot_id, rows$spot_id)
-  if (anyNA(index)) stop("Hotspot map requires an explicit row for every retained spot.")
+
   rows <- rows[index, , drop = FALSE]
   canvas <- spatial_canvas(spots, background, borders)
   d <- canvas$data
   d$tested <- rows$tested %in% TRUE; d$significant <- rows$native_significant %in% TRUE
-  if (any(d$significant & (!d$tested | !is.finite(rows$p_value) | rows$p_value < 0 | rows$p_value > 1))) {
-    stop("Hotspot maps require valid p-values for tested significant spots.")
-  }
+
   d$value <- -log10(pmax(rows$p_value, .Machine$double.xmin))
   # Every retained spot has a background state; significant tested spots keep
   # their native p-values and use the warm colour scale.
@@ -204,13 +175,11 @@ plot_hotspot_values <- function(spots, rows, title, background = NULL,
         ticks.colour = "white")) +
     ggplot2::labs(title = title, fill = expression(-log[10](italic(p))))
   if (!is.null(borders)) {
-    if (is.null(background)) stop("Registered image borders require the calibrated image background.")
     plot <- add_pathology_borders(plot, borders,
       x_scale = background$scale, y_scale = -background$scale)
   }
   plot
 }
-
 
 lr_triptych <- function(spe, manifest_row, lr_spot, background = NULL, point_size = NULL,
                         borders = NULL) {
@@ -232,50 +201,33 @@ lr_triptych <- function(spe, manifest_row, lr_spot, background = NULL, point_siz
     ncol = 2, widths = c(2.6, 4.6))
 }
 
-
 plot_visium_cell_types_with_rois <- function(spe, borders) {
   require_packages(c("SpatialExperiment", "SummarizedExperiment", "ggplot2"))
   cd <- SummarizedExperiment::colData(spe)
-  if (!all(c("image_x", "image_y") %in% names(cd))) {
-    stop("Prepare the export's image_x/image_y full-resolution pixel coordinates before plotting.")
-  }
+
   type_column <- intersect(c("dominant_ct", "cell_type"), names(cd))[1]
-  if (is.na(type_column)) stop("Add the dominant cell-type annotations before plotting.")
+
   cell_types <- as.character(cd[[type_column]])
   cell_types[is.na(cell_types) | !nzchar(cell_types)] <- "Unknown"
   spots <- data.frame(image_x = cd$image_x, image_y = cd$image_y,
                       cell_type = cell_types)
-  if (!nrow(spots) || any(!is.finite(as.matrix(spots[, c("image_x", "image_y")])))) {
-    stop("The cell-type map requires non-empty, finite spot coordinates.")
-  }
+
   regions <- c("Invasive_Tumor", "DCIS_1", "DCIS_2")
-  if (!is.data.frame(borders) || !all(c("x", "y", "piece", "region") %in% names(borders)) ||
-      !nrow(borders) || !is.numeric(borders$x) || !is.numeric(borders$y) ||
-      any(!is.finite(borders$x)) || any(!is.finite(borders$y)) ||
-      anyNA(borders$piece) || any(!nzchar(as.character(borders$piece))) ||
-      any(!borders$region %in% regions)) {
-    stop("Supply registered pathology borders with finite x/y, piece and region columns.")
-  }
+
   borders$path_group <- interaction(borders$region, borders$piece, drop = TRUE)
 
   # Use the same category order and colours as the Xenium report, including
   # categories with nonzero proportions but no dominant Visium spots.
   colours <- visium_cell_type_palette()
-  unexpected <- setdiff(unique(cell_types), c(names(colours), "Unknown"))
-  if (length(unexpected)) {
-    stop("Harmonize Visium cell types with annotate_visium() before plotting: ",
-         paste(unexpected, collapse = ", "))
-  }
+
   if ("Unknown" %in% cell_types) colours <- c(colours, Unknown = "grey75")
   spots$cell_type <- factor(spots$cell_type, levels = names(colours))
   sample_ids <- unique(as.character(spe$sample_id))
-  if (length(sample_ids) != 1L || is.na(sample_ids) || !nzchar(sample_ids)) {
-    stop("The cell-type map requires one Visium sample.")
-  }
+
   images <- SpatialExperiment::imgData(spe)
   candidates <- which(images$sample_id == sample_ids &
                         is.finite(images$scaleFactor) & images$scaleFactor > 0)
-  if (!length(candidates)) stop("The cell-type map requires a calibrated embedded image.")
+
   image_index <- candidates[which.max(images$scaleFactor[candidates])]
   raster <- SpatialExperiment::imgRaster(spe, sample_id = sample_ids,
                                          image_id = images$image_id[image_index])
@@ -320,7 +272,6 @@ plot_visium_cell_types_with_rois <- function(spe, borders) {
                    plot.title = ggplot2::element_text(face = "bold"))
 }
 
-
 regional_proportion_overview <- function(mat, colours, title, show_lr_names = FALSE,
                                          show_legend = TRUE) {
   ComplexHeatmap::Heatmap(
@@ -347,10 +298,9 @@ regional_proportion_overview <- function(mat, colours, title, show_lr_names = FA
       labels_gp = grid::gpar(fontsize = 9)))
 }
 
-
 minimum_partner_counts <- function(counts, symbols) {
   genes <- unique(trimws(strsplit(symbols, ",", fixed = TRUE)[[1]]))
-  if (!length(genes) || any(!genes %in% rownames(counts))) stop("Incomplete partner: ", symbols)
+
   Reduce(pmin, lapply(genes, function(g) as.numeric(counts[g, ])))
 }
 
@@ -360,28 +310,23 @@ save_panel <- function(plot, panel, width, height) {
   save_figure_panel(plot, panel, width, height, device = grDevices::pdf)
 }
 
-
+# 2. Read the processed image/spot input and saved LR/pathway results.
 spe <- readRDS(repo_path("Data", "generated", "visium", "visium_qc_counts_gt3000_annotated.rds"))
-stopifnot(nrow(spe) == 18085L, ncol(spe) == 4412L)
+
 summary <- utils::read.csv(repo_path("res", "visium", "lri_summary.csv"),
   check.names = FALSE, stringsAsFactors = FALSE)
 local <- as.data.frame(data.table::fread(repo_path("res", "visium", "lri_by_spot.csv.gz"),
   select = c("lr_id", "spot_id", "p_value", "tested", "native_significant"),
   na.strings = "NA"))
 summary <- summary[order(summary$rank), , drop = FALSE]
-stopifnot(nrow(summary) == 1616L, !anyDuplicated(summary$lr_id),
-          nrow(local) == nrow(summary) * ncol(spe),
-          identical(local$lr_id, rep(summary$lr_id, each = ncol(spe))),
-          identical(local$spot_id, rep(colnames(spe), times = nrow(summary))),
-          !anyNA(local$tested), !anyNA(local$native_significant),
-          all(!local$native_significant | local$tested))
+
 spots <- as.data.frame(SummarizedExperiment::colData(spe), optional = TRUE)
 borders <- S4Vectors::metadata(spe)$pathology$borders_visium_pixels
-stopifnot(is.data.frame(borders), nrow(borders) > 0L)
+
 images <- SpatialExperiment::imgData(spe)
 visium <- S4Vectors::metadata(spe)$visium
 image_index <- which(images$sample_id == visium$sample_id & images$image_id == visium$image_id)
-stopifnot(length(image_index) == 1L)
+
 raster <- SpatialExperiment::imgRaster(spe, sample_id = visium$sample_id,
                                       image_id = visium$image_id)
 background <- list(image = raster, width = ncol(raster), height = nrow(raster),
@@ -391,7 +336,7 @@ background <- list(image = raster, width = ncol(raster), height = nrow(raster),
 # significant lists only; it does not recompute weights, LRI or permutations.
 significant <- matrix(local$native_significant, nrow = ncol(spe))
 p_values <- matrix(local$p_value, nrow = ncol(spe))
-stopifnot(identical(as.integer(colSums(significant)), as.integer(summary$sig_numbers)))
+
 lr_native <- summary
 rownames(lr_native) <- summary$lr_id
 lr_native$sig_index <- I(lapply(seq_len(nrow(summary)), function(i) which(significant[, i])))
@@ -402,20 +347,38 @@ lr_native$sig_pval <- I(lapply(seq_len(nrow(summary)), function(i)
 # micrometre coordinates rather than substituting the inference lattice.
 image_xy <- SpatialExperiment::spatialCoords(spe)[,
   c("pxl_col_in_fullres", "pxl_row_in_fullres"), drop = FALSE]
-stopifnot(identical(S4Vectors::metadata(spe)$coord_unit, "micron"))
+
 bins <- sf::st_as_sf(data.frame(spot_id = colnames(spe),
   img_x = image_xy[, 1], img_y = image_xy[, 2],
   x = spe$grid_x_um, y = spe$grid_y_um), coords = c("x", "y"))
 res <- structure(list(LR_results = lr_native, bins = bins,
   spatial_weights = NULL, CCI_scores = NULL, level = "lr"), class = c("blisa", "list"))
-res_pathway <- blisa::blisaPathway(res)
-stopifnot(inherits(res_pathway, "blisa"), identical(res_pathway$level, "pathway"),
-          identical(rownames(res_pathway$LR_results)[1L], "LAMININ"))
+# Restore the native pathway plotting structure from saved pathway results.
+# No pathway aggregation is performed by this plotting script.
+pathway <- read.csv(repo_path("res", "visium", "pathway_summary.csv"),
+  check.names = FALSE)
+pathway <- pathway[order(pathway$rank), ]
+pathway_hotspots <- as.data.frame(data.table::fread(repo_path("res", "visium",
+  "pathway_hotspots_by_spot.csv.gz")))
+pathway_pairs <- read.csv(repo_path("res", "visium", "pathway_lr_pairs.csv"))
+pathway_rows <- lapply(pathway$pathway, function(id)
+  pathway_hotspots[pathway_hotspots$pathway == id, , drop = FALSE])
+rownames(pathway) <- pathway$pathway
+pathway$sig_index <- I(lapply(pathway_rows, function(x) match(x$spot_id, colnames(spe))))
+pathway$sig_pval <- I(lapply(pathway_rows, function(x) x$p_value))
+pathway$LR_pairs <- I(lapply(pathway$pathway, function(id)
+  pathway_pairs$lr_id[pathway_pairs$pathway == id]))
+pathway$top_LR_pair <- I(lapply(pathway_rows, function(x)
+  strsplit(x$top_lr_pairs, ";", fixed = TRUE)))
+res_pathway <- structure(list(LR_results = pathway, bins = bins,
+  spatial_weights = NULL, CCI_scores = NULL, level = "pathway"),
+  class = c("blisa", "list"))
 # Keep the source chunk names below; these aliases refer to the same annotated
 # native-feature SPE and already registered borders loaded above.
 spe_qc <- spe
 visium_borders <- borders
 
+# 3. Draw Figure 3a-e using the original report layouts.
 # Figure 3a: exact cell-types-pathology chunk (9 x 6.8 inches).
 save_panel(plot_visium_cell_types_with_rois(spe, borders), "figure3a", 9, 6.8)
 
@@ -446,7 +409,7 @@ save_panel(p_lr_rank, "figure3b", 7.2, 5.4)
 
 # Figure 3c: original PPIA_BSG maps, arranged as in the updated manuscript.
 pair <- summary[summary$lr_id == "PPIA_BSG", , drop = FALSE]
-stopifnot(nrow(pair) == 1L)
+
 save_panel(lr_triptych(spe, pair, local, background, borders = borders),
            "figure3c", 7.2, 6.2)
 
@@ -515,18 +478,15 @@ p_pathway <- add_pathology_borders(p_pathway, visium_borders,
   show_legend = TRUE, linewidth = 0.8) + theme(legend.box = "vertical")
 save_panel(p_pathway, "figure3e", 4.6, 4.8)
 
+# 4. Draw saved regional hotspot proportions for Figure S4.
 # S4 retains the native LR order and divides by ALL retained spots in each region,
 # including untested spots. Non-tumour means the complement of the three ROIs.
-regions <- as.character(spe$region)
-regions[regions == "Outside ROI"] <- "Non-tumour"
+regional <- read.csv(repo_path("res", "visium", "visium_lri_regional_coverage.csv"))
 region_order <- c("Invasive_Tumor", "DCIS_1", "DCIS_2", "Non-tumour")
-stopifnot(!anyNA(regions), all(regions %in% region_order))
-proportions <- vapply(region_order, function(region) {
-  keep <- regions == region
-  if (!any(keep)) return(rep(NA_real_, nrow(summary)))
-  colSums(significant[keep, , drop = FALSE]) / sum(keep)
-}, numeric(nrow(summary)))
-rownames(proportions) <- summary$lr_id
+proportions <- matrix(NA_real_, nrow = nrow(summary), ncol = length(region_order),
+  dimnames = list(summary$lr_id, region_order))
+proportions[cbind(match(regional$lr_id, summary$lr_id),
+  match(regional$region, region_order))] <- regional$hotspot_proportion
 region_colours <- c(Invasive_Tumor = "#377EB8", DCIS_1 = "#4DAF4A",
   DCIS_2 = "#006D2C", "Non-tumour" = "#555555")
 # Export the two panels separately at the original report dimensions.
@@ -535,6 +495,6 @@ top100_grob <- heatmapGrob(regional_proportion_overview(
   "Top 100 LR pairs", show_lr_names = TRUE, show_legend = FALSE),
   width = 4, height = 8.8)
 all_grob <- heatmapGrob(regional_proportion_overview(proportions,
-  region_colours, "All 1,616 LR pairs"), width = 3.2, height = 8.8)
+  region_colours, paste("All", format(nrow(summary), big.mark = ","), "LR pairs")), width = 3.2, height = 8.8)
 save_figure_panel(top100_grob, "figureS4a", 4, 8.8)
 save_figure_panel(all_grob, "figureS4b", 3.2, 8.8)

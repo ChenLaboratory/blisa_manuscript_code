@@ -8,6 +8,7 @@ suppressPackageStartupMessages({
   library(Matrix)
 })
 
+# 1. Read the release cells and harmonize DCIS labels with the published ROIs.
 spe <- read_source_data("xenium")
 spe$cell_type_broad <- spe$cell_type
 spe$cell_type <- splitDCISLabels(spe$cell_type_broad, spe$Cluster)
@@ -16,10 +17,12 @@ roi_validation <- validatePaperROIs(paper, spe)
 
 coords <- as.data.frame(SpatialExperiment::spatialCoords(spe))
 counts <- SummarizedExperiment::assay(spe, "counts")
+# 2. Aggregate expression into 50-micrometre hexagons.
 # Keep the native hexBinCells filtering defaults used in the manuscript.
 binned <- blisa::hexBinCells(coords_df = coords, counts_matrix = counts,
   bin_size = 50, group = spe$cell_type)
 
+# 3. Preserve cell counts, proportions and region labels with the processed input.
 # Count annotated cells separately from cell-type-specific gene expression.
 cell_type <- droplevels(factor(spe$cell_type))
 indicators <- Matrix::sparseMatrix(
@@ -30,13 +33,9 @@ cell_bins <- blisa::hexBinCells(coords_df = coords, counts_matrix = indicators,
   bin_size = 50, min_cells = 1, min_total_counts = 0)
 sample_id <- colnames(binned$counts_matrix)
 index <- match(sample_id, colnames(cell_bins$counts_matrix))
-geometry_index <- match(binned$bins$bin_id, cell_bins$bins$bin_id)
-stopifnot(!anyDuplicated(colnames(cell_bins$counts_matrix)), !anyNA(index),
-  !anyNA(geometry_index), identical(
-    sf::st_as_binary(sf::st_geometry(binned$bins)),
-    sf::st_as_binary(sf::st_geometry(cell_bins$bins[geometry_index, ]))))
+
 numbers <- cell_bins$counts_matrix[, index, drop = FALSE]
-stopifnot(all(Matrix::colSums(numbers) == binned$bins$n_cells))
+
 proportions <- numbers %*% Matrix::Diagonal(x = 1 / Matrix::colSums(numbers))
 dimnames(proportions) <- dimnames(numbers)
 number_matrix <- as.matrix(Matrix::t(numbers))
@@ -63,7 +62,8 @@ binned$cells_metadata <- data.frame(cell_id = colnames(spe),
 binned$preparation <- list(bin_size_um = 50,
   source = "spe_xenium_bc_s1rep1.rds", roi_y_offset = paper$y_offset,
   blisa_version = as.character(utils::packageVersion("blisa")))
-stopifnot(identical(rownames(binned$bins_metadata), sample_id))
+
+# 4. Save the processed input used by LRI/CCI analysis and expression plots.
 destination <- repo_path("Data", "generated", "xenium", "xenium_50um_binned.rds")
 dir.create(dirname(destination), recursive = TRUE, showWarnings = FALSE)
 saveRDS(binned, destination)

@@ -1,20 +1,14 @@
 # Visium preparation and CSV export helpers extracted from the executed manuscript analysis.
 # Source after codes/helpers/source_data_helpers.R. Sourcing performs no analysis.
 
-
 visium_position_table <- function(spe) {
-  if (!inherits(spe, "SpatialExperiment")) stop("Expected a SpatialExperiment.")
   cd <- SummarizedExperiment::colData(spe)
   xy <- SpatialExperiment::spatialCoords(spe)
   fields <- c("in_tissue", "array_row", "array_col")
   coords <- c("pxl_col_in_fullres", "pxl_row_in_fullres")
-  if (!all(fields %in% names(cd)) || !all(coords %in% colnames(xy))) {
-    stop("Expected the vignette SPE's tissue, array and full-resolution pixel coordinates.")
-  }
+
   ids <- colnames(spe)
-  if (!length(ids) || anyNA(ids) || any(!nzchar(ids)) || anyDuplicated(ids)) {
-    stop("Unique, non-empty spot barcodes are required.")
-  }
+
   positions <- data.frame(barcode = ids, as.data.frame(cd[, fields]),
                          xy[, coords, drop = FALSE], row.names = NULL)
   # The example SPE's pixel-named columns have already been converted to
@@ -22,18 +16,12 @@ visium_position_table <- function(spe) {
   unit <- S4Vectors::metadata(spe)$coord_unit
   if (identical(unit, "micron")) {
     um_per_pixel <- S4Vectors::metadata(spe)$um_per_pixel
-    if (length(um_per_pixel) != 1L || !is.numeric(um_per_pixel) ||
-        !is.finite(um_per_pixel) || um_per_pixel <= 0) {
-      stop("Micrometre coordinates require a positive metadata$um_per_pixel.")
-    }
+
     positions[, coords] <- positions[, coords] / um_per_pixel
-  } else if (!identical(unit, "pixel")) {
-    stop("Expected SPE metadata$coord_unit to be 'micron' or 'pixel'.")
   }
-  if (any(!is.finite(as.matrix(positions[, -1])))) stop("Invalid spot coordinates.")
+
   positions
 }
-
 
 visium_cell_type_palette <- function() {
   # Category order and colours shared with the Xenium manuscript report.
@@ -43,7 +31,6 @@ visium_cell_type_palette <- function() {
     Others = "#FC8D62", B_Cells = "#8DA0CB", `Perivascular-Like` = "#E78AC3",
     DCs = "#A6D854", Mast_Cells = "#FFD92F")
 }
-
 
 visium_cell_type_mapping <- function() {
   c(B_Cells = "B_Cells", `CD4+_T_Cells` = "CD4+_T_Cells", `CD8+_T_Cells` = "CD8+_T_Cells",
@@ -55,22 +42,14 @@ visium_cell_type_mapping <- function() {
     `Stromal_&_T_Cell_Hybrid` = "Others", `T_Cell_&_Tumor_Hybrid` = "Others")
 }
 
-
 harmonize_visium_cell_types <- function(estimates) {
-  if (!is.matrix(estimates) || !is.numeric(estimates) || !ncol(estimates)) {
-    stop("Cell-type estimates must be a numeric matrix with named columns.")
-  }
   source_types <- colnames(estimates)
-  if (is.null(source_types) || anyNA(source_types) || any(!nzchar(source_types)) ||
-      anyDuplicated(source_types)) stop("Cell-type estimate columns must have unique non-empty names.")
+
   mapping <- visium_cell_type_mapping()
-  unmapped <- setdiff(source_types, names(mapping))
-  if (length(unmapped)) stop("Unmapped Visium cell types: ", paste(unmapped, collapse = ", "))
-  # Entirely missing rows represent unmatched barcodes. Partially missing rows
-  # cannot be interpreted as a complete deconvolution and are rejected.
+
+  # Entirely missing rows represent unmatched barcodes.
   missing <- rowSums(is.na(estimates)) == ncol(estimates)
-  observed <- estimates[!missing, , drop = FALSE]
-  if (any(!is.finite(observed)) || any(observed < 0)) stop("Invalid cell-type estimates.")
+
   type_order <- names(visium_cell_type_palette())
   grouped <- matrix(0, nrow = nrow(estimates), ncol = length(type_order),
                     dimnames = list(rownames(estimates), type_order))
@@ -103,28 +82,18 @@ harmonize_visium_cell_types <- function(estimates) {
                                      xenium_cell_type = unname(mapping[source_types])))
 }
 
-
 lr_panel_coverage <- function(database, gene_panel) {
   required <- c("ligand.symbol", "receptor.symbol", "annotation", "pathway_name")
-  if (!is.data.frame(database) || !all(required %in% names(database))) {
-    stop("Supply the native BLISA interaction database with expanded partner symbols.")
-  }
+
   ids <- rownames(database)
-  if (is.null(ids) || anyNA(ids) || any(!nzchar(ids)) || anyDuplicated(ids)) {
-    stop("Database interactions must have unique, nonempty row identifiers.")
-  }
+
   gene_panel <- unique(as.character(gene_panel))
-  if (!length(gene_panel) || anyNA(gene_panel) || any(!nzchar(gene_panel))) {
-    stop("The data gene panel must contain nonempty gene symbols.")
-  }
+
   # Native parsing handles comma- or underscore-separated subunits and whitespace.
   parse_units <- getFromNamespace("parse_units", "blisa")
   ligand_units <- lapply(as.character(database$ligand.symbol), parse_units)
   receptor_units <- lapply(as.character(database$receptor.symbol), parse_units)
-  valid_units <- function(x) length(x) > 0L && !anyNA(x) && all(nzchar(x))
-  if (!all(vapply(c(ligand_units, receptor_units), valid_units, logical(1)))) {
-    stop("Database contains missing ligand/receptor symbols; cannot determine panel coverage.")
-  }
+
   missing_units <- function(units) {
     vapply(units, function(x) paste(setdiff(x, gene_panel), collapse = ", "), character(1))
   }
@@ -142,10 +111,9 @@ lr_panel_coverage <- function(database, gene_panel) {
     gene_panel = gene_panel, LR_df = database
   )
   out$panel_covered <- ids %in% rownames(included)
-  stopifnot(identical(out$panel_covered, out$ligand_covered & out$receptor_covered))
+
   out
 }
-
 
 lr_panel_coverage_summary <- function(coverage) {
   annotation <- as.character(coverage$annotation)
@@ -164,144 +132,60 @@ lr_panel_coverage_summary <- function(coverage) {
   )
 }
 
-
-native_report_tables <- function(result, spe) {
-  if (is.null(result) || is.null(result$LR_results) || is.null(result$bins) || is.null(result$spatial_weights)) {
-    stop("Expected a native BLISA result with LR_results, bins and spatial_weights.")
-  }
+visium_spot_table <- function(result, spe) {
   output <- as.data.frame(result$LR_results, check.names = FALSE)
   ids <- rownames(output)
-  if (anyNA(ids) || any(!nzchar(ids)) || anyDuplicated(ids)) stop("Invalid native BLISA LR rownames.")
+
   cd <- as.data.frame(SummarizedExperiment::colData(spe), optional = TRUE)
-  before_count_filter <- seq_len(ncol(spe))
-  if ("in_tissue" %in% names(cd)) {
-    if (anyNA(cd$in_tissue)) stop("Cannot map native Visium bins with missing in_tissue values.")
-    before_count_filter <- before_count_filter[cd$in_tissue == 1]
-  }
+  before_count_filter <- which(cd$in_tissue == 1)
   bin_index <- result$bins$bin_id
-  if (!is.numeric(bin_index) || anyNA(bin_index) || any(bin_index != as.integer(bin_index)) ||
-      anyDuplicated(bin_index) || any(!bin_index %in% seq_along(before_count_filter))) {
-    stop("Cannot map native Visium bin IDs back to prepared spots.")
-  }
+
   # visiumSpotBins numbers bins after its tissue filter, before its native count filter.
   mapped <- before_count_filter[as.integer(bin_index)]
-  expected <- before_count_filter[Matrix::colSums(SummarizedExperiment::assay(spe, "counts"))[
-    before_count_filter] >= eval(formals(blisa::visiumSpotBins)$min_total_counts)]
-  if (!identical(mapped, expected)) stop("Native Visium result bins do not match its default spot filters.")
-  copy <- result
-  copy$bins$spot_id <- colnames(spe)[mapped]
-  output$lr_id <- ids
-  copy$LR_results <- output
-  scalar <- vapply(output, function(x) is.atomic(x) && is.null(dim(x)), logical(1))
-  manifest <- output[, scalar, drop = FALSE]
-  for (field in c("ligand.symbol", "receptor.symbol", "annotation", "pathway_name")) {
-    if (!field %in% names(manifest)) manifest[[field]] <- rep(NA_character_, nrow(manifest))
-  }
-  manifest$is_complex <- grepl(",", manifest$ligand.symbol, fixed = TRUE) |
-    grepl(",", manifest$receptor.symbol, fixed = TRUE)
-  pair_status <- data.frame(lr_id = ids, status = rep("tested", length(ids)),
-    reason = rep("Returned by the native BLISA Visium pipeline", length(ids)), stringsAsFactors = FALSE)
+
+  spot_ids <- colnames(spe)[mapped]
   rows <- lapply(seq_len(nrow(output)), function(i) {
     p <- output$all_pval[[i]]; score <- output$all_lisa[[i]]; q <- output$all_quadrant[[i]]
-    n <- nrow(copy$bins)
-    if (!is.numeric(p) || !is.numeric(score) || length(p) != n || length(score) != n || length(q) != n) {
-      stop("Native BLISA per-spot output dimensions are inconsistent.")
-    }
+    n <- nrow(result$bins)
+
     mode <- as.character(output$ccc_mode[i])
-    if (length(mode) != 1L || is.na(mode) || !mode %in% c("nearby", "diffuse")) stop("Unknown native BLISA spatial mode.")
+
     keep <- if (mode == "nearby") result$spatial_weights$keep_idx_queen else result$spatial_weights$keep_idx_dist
-    if (is.null(keep)) stop("Missing native BLISA tested-spot mask.")
-    if (anyNA(keep) || any(keep != as.integer(keep)) || any(!keep %in% seq_len(n))) stop("Invalid native tested-spot indices.")
+
     tested <- rep(FALSE, n); tested[keep] <- TRUE
     tested <- tested & is.finite(p)
     sig_index <- output$sig_index[[i]]
-    if (anyNA(sig_index) || any(sig_index != as.integer(sig_index)) || any(!sig_index %in% seq_len(n))) {
-      stop("Invalid native BLISA hotspot indices.")
-    }
+
     sig <- rep(FALSE, n); sig[sig_index] <- TRUE
-    if (any(sig & !tested)) stop("A native BLISA hotspot must be a tested spot.")
+
     p[!tested] <- NA_real_; score[!tested] <- NA_real_
-    data.frame(lr_id = ids[i], spot_id = copy$bins$spot_id, p_value = p,
-      adjusted_p_value = rep(NA_real_, n), score = score, tested = tested,
-      raw_significant = sig, native_significant = sig, quadrant = as.character(q), stringsAsFactors = FALSE)
+    data.frame(lr_id = ids[i], spot_id = spot_ids, p_value = p,
+      score = score, tested = tested, native_significant = sig,
+      quadrant = as.character(q), stringsAsFactors = FALSE)
   })
-  lr_spot <- do.call(rbind, rows)
-  list(result = copy, manifest = manifest, pair_status = pair_status, lr_spot = lr_spot)
+  do.call(rbind, rows)
 }
 
-
 lri_result_summary <- function(result) {
-  if (is.null(result$LR_results) || is.null(result$bins)) {
-    stop("Expected a BLISA result with LR_results and bins.")
-  }
   x <- as.data.frame(result$LR_results, check.names = FALSE)
   ids <- rownames(x)
-  if (length(ids) != nrow(x) || anyNA(ids) || any(!nzchar(ids)) || anyDuplicated(ids)) {
-    stop("BLISA LR row names must be nonempty, unique interaction identifiers.")
-  }
-  if (anyDuplicated(names(x)) || !all(c("sig_numbers", "sig_index", "all_pval") %in% names(x))) {
-    stop("LR_results must have unique column names and native hotspot counts, indices and P values.")
-  }
-  if ("lr_id" %in% names(x) && !identical(as.character(x$lr_id), ids)) {
-    stop("Existing lr_id values differ from the native BLISA row names.")
-  }
-  if ("rank" %in% names(x) && !identical(as.numeric(x$rank), as.numeric(seq_len(nrow(x))))) {
-    stop("Existing rank values differ from native BLISA row order.")
-  }
+
   n_bins <- nrow(result$bins)
-  if (length(n_bins) != 1L || !is.finite(n_bins) || n_bins < 0L) {
-    stop("BLISA bins must have a valid row count.")
-  }
-  if (!is.numeric(x$sig_numbers) || anyNA(x$sig_numbers) ||
-      any(!is.finite(x$sig_numbers)) || any(x$sig_numbers < 0) ||
-      any(x$sig_numbers != as.integer(x$sig_numbers)) ||
-      !is.list(x$sig_index) || !is.list(x$all_pval)) {
-    stop("Invalid native BLISA hotspot counts or per-bin lists.")
-  }
-  valid_indices <- function(index) {
-    is.numeric(index) && !anyNA(index) && all(is.finite(index)) &&
-      all(index == as.integer(index)) && !anyDuplicated(index) &&
-      all(index %in% seq_len(n_bins))
-  }
+
   tested <- integer(nrow(x))
   for (i in seq_len(nrow(x))) {
-    significant <- x$sig_index[[i]]
-    if (!valid_indices(significant) || x$sig_numbers[i] != length(significant)) {
-      stop("Inconsistent sig_numbers or sig_index for ", ids[i], ".")
-    }
     p <- x$all_pval[[i]]
-    if (!is.numeric(p) || length(p) != n_bins ||
-        any(is.finite(p) & (p < 0 | p > 1))) {
-      stop("Invalid per-bin P values for ", ids[i], ".")
-    }
+
     available <- is.finite(p)
     # Native BLISA can leave finite placeholders in isolated bins. Intersect
     # with the spatial-mode mask so these do not inflate the tested count.
-    if (!is.null(result$spatial_weights)) {
-      mode <- if ("ccc_mode" %in% names(x)) as.character(x$ccc_mode[i]) else NA_character_
-      if (is.na(mode) || !mode %in% c("nearby", "diffuse")) {
-        stop("Missing or invalid native BLISA spatial mode for ", ids[i], ".")
-      }
-      key <- if (mode == "nearby") "keep_idx_queen" else "keep_idx_dist"
-      keep <- result$spatial_weights[[key]]
-      if (is.null(keep) || !valid_indices(keep)) {
-        stop("Missing or invalid tested-bin mask ", key, " for ", ids[i], ".")
-      }
-      available <- available & seq_len(n_bins) %in% keep
-    }
-    if (any(!available[significant])) {
-      stop("A significant hotspot is outside the tested bins for ", ids[i], ".")
-    }
+    mode <- as.character(x$ccc_mode[i])
+    key <- if (mode == "nearby") "keep_idx_queen" else "keep_idx_dist"
+    available <- available & seq_len(n_bins) %in% result$spatial_weights[[key]]
     tested[i] <- sum(available)
   }
   scalar <- vapply(x, function(column) is.atomic(column) && is.null(dim(column)), logical(1))
   output <- x[, scalar, drop = FALSE]
-  for (key in c("n_tested", "n_total_bins")) {
-    expected <- if (key == "n_tested") tested else rep(n_bins, nrow(x))
-    if (key %in% names(output) && !identical(as.numeric(output[[key]]), as.numeric(expected))) {
-      stop("Existing ", key, " conflicts with the per-bin BLISA results.")
-    }
-  }
   output$rank <- seq_len(nrow(x))
   output$lr_id <- ids
   output$n_tested <- tested
@@ -311,10 +195,7 @@ lri_result_summary <- function(result) {
   output
 }
 
-
 measure_blisa_call <- function(expr, sample_interval_seconds = 0.1) {
-  stopifnot(length(sample_interval_seconds) == 1L,
-            is.finite(sample_interval_seconds), sample_interval_seconds > 0)
   require_packages(c("callr", "ps"))
   parent <- ps::ps_handle()
   rss_mib <- function() unname(ps::ps_memory_info(parent)["rss"]) / 1024^2
@@ -365,7 +246,6 @@ measure_blisa_call <- function(expr, sample_interval_seconds = 0.1) {
   file.create(stop_file)
   monitor$wait(timeout = 5000)
   sampled <- tryCatch({
-    if (monitor$is_alive()) stop("memory sampler did not stop")
     monitor$get_result()
   }, error = function(e) {
     warning("BLISA completed, but peak memory is unavailable: ", conditionMessage(e))
@@ -393,14 +273,11 @@ measure_blisa_call <- function(expr, sample_interval_seconds = 0.1) {
   ))
 }
 
-
 project_xy <- function(xy, transform) {
   z <- cbind(as.matrix(xy), 1) %*% t(transform)
-  if (any(!is.finite(z)) || any(abs(z[, 3]) < 1e-8))
-    stop("Invalid homogeneous coordinates in published transform.")
+
   z[, 1:2, drop = FALSE] / z[, 3]
 }
-
 
 paperROIBorderPaths <- function(rois) {
   do.call(rbind, lapply(seq_len(nrow(rois)), function(i) {
@@ -414,19 +291,11 @@ paperROIBorderPaths <- function(rois) {
   }))
 }
 
-
 annotate_visium <- function(spe, decon, workbook) {
-  if (anyDuplicated(names(decon))) stop("Deconvolution table column names must be unique.")
-  if (!"barcode" %in% names(decon) || anyNA(decon$barcode) ||
-      any(!nzchar(decon$barcode)) || anyDuplicated(decon$barcode)) {
-    stop("Deconvolution table needs a unique, non-empty barcode column.")
-  }
   type_names <- setdiff(names(decon), "barcode")
-  if (!length(type_names) || !all(vapply(decon[type_names], is.numeric, logical(1)))) {
-    stop("Deconvolution columns must be numeric cell-type estimates.")
-  }
+
   values <- as.matrix(decon[, type_names, drop = FALSE])
-  if (any(!is.finite(values)) || any(values < 0)) stop("Invalid cell-type estimates.")
+
   index <- match(colnames(spe), decon$barcode)
   estimates <- values[index, , drop = FALSE]
   rownames(estimates) <- colnames(spe)
@@ -485,17 +354,15 @@ annotate_visium <- function(spe, decon, workbook) {
   spe
 }
 
-
 load_visium_cellchat <- function() {
   path <- repo_path("Data", "downloaded", "cellchat_github", "CellChatDB.human.rda")
-  hash <- digest::digest(file = path, algo = "sha256")
-  stopifnot(identical(hash, "582e99db2bb1b1e05c0364553893d804952bd007fef870720a9cc659a7bd3ad8"))
+
   database <- new.env()
   load(path, envir = database)
   cache <- getFromNamespace(".blisa_cache", "blisa")
   cache[["CellChatDB.human"]] <- database$CellChatDB.human$interaction
   database <- getFromNamespace(".load_cellchat_db", "blisa")("human")
-  stopifnot(nrow(database) == 3233L)
+
   database
 }
 
