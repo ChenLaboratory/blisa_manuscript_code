@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Plot saved CSV results only. Does not run BLISA or change processed inputs.
+# Plot saved native BLISA results and comparison CSVs without running inference.
 # Execute from the repository root after 04_compare_aligned_lri.R.
 # 1. Load processed coordinates and saved comparison results.
 source("codes/helpers/source_data_helpers.R")
@@ -15,8 +15,14 @@ cell_file <- file.path(data_dir, "xenium_overlap_cells.csv")
 cells <- read.csv(cell_file, stringsAsFactors = FALSE)
 read_result <- function(name) read.csv(file.path(result_dir, name),
   check.names = FALSE, stringsAsFactors = FALSE)
-summary_v <- read_result("visium_lri_summary.csv")
-summary_x <- read_result("xenium_lri_summary.csv")
+# Native LR tables supply the rankings in each platform's original result order.
+ranking_table <- function(result) {
+  lr <- result$LR_results
+  data.frame(lr_label = paste(lr$ligand.symbol, lr$receptor.symbol, sep = " - "),
+    n_sig = lr$sig_numbers)
+}
+summary_v <- ranking_table(readRDS(file.path(result_dir, "visium_blisa_result.rds")))
+summary_x <- ranking_table(readRDS(file.path(result_dir, "xenium_blisa_result.rds")))
 paired <- read_result("aligned_lri_hotspot_counts.csv")
 paired$lr_label <- gsub(" - ", "–", paired$lr_label, fixed = TRUE)
 correlation <- read_result("aligned_lri_hotspot_count_correlation.csv")

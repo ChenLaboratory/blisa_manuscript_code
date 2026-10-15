@@ -11,6 +11,7 @@ runtime_plot <- function() {
     geom_point(size=3.8,stroke=0.8)+
     geom_text(aes(label=sprintf("%.2f min\n%.2f GiB",elapsed_minutes,peak_rss_gib),
       x=peak_rss_gib+ifelse(condition=="spatialdm_permutation",-1,1)*max(memory_breaks)*0.055,
+      y=pmax(elapsed_minutes,max(runtime_breaks)*0.04),
       hjust=ifelse(condition=="spatialdm_permutation",1,0)),
       size=2.6,lineheight=0.95,vjust=0.5,show.legend=FALSE)+
     scale_colour_manual(values=colours,breaks=methods,labels=labels,drop=FALSE)+

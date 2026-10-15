@@ -1,4 +1,4 @@
-"""Fresh Xenium benchmark panels from complete saved-result CSVs.
+"""Fresh Xenium benchmark panels from saved native and comparison results.
 
 Called by the matching R script, which supplies exact saved hexagon geometry.
 Styles follow manuscript_update_20261012/generate_report.py; the map blocks
@@ -44,6 +44,10 @@ hex_limits = (hexagons[..., 0].min(), hexagons[..., 0].max(),
               hexagons[..., 1].min(), hexagons[..., 1].max())
 summary = pd.read_csv(results / "xenium_benchmark_lr_summary.csv")
 local = pd.read_csv(results / "xenium_benchmark_lri_by_bin.csv.gz", float_precision="round_trip", low_memory=False)
+# The R wrapper converts the saved native object only for drawing these maps.
+# Ignore legacy BLISA rows when reusing the existing Python-method cache.
+blisa_local = pd.read_csv(args.geometry / "blisa_local.csv", float_precision="round_trip")
+local = pd.concat([blisa_local, local[local.method != "blisa"]], ignore_index=True)
 ids = summary.sort_values("rank").lr_id.drop_duplicates().tolist()
 # 1. Read the shared LR set and regional proportions already computed in analysis.
 overlap = pd.read_csv(results / "xenium_benchmark_jaccard_by_lr.csv")

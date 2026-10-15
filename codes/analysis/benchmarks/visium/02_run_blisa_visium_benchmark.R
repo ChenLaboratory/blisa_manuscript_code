@@ -12,7 +12,6 @@ nperm <- 10000L
 seed <- 20260915L
 radius <- 250
 spe <- readRDS(file.path(data_dir, "visium_qc_benchmark_18082_genes.rds"))
-spots <- as.data.frame(SummarizedExperiment::colData(spe), optional = TRUE)
 lr_df <- read.csv(file.path(data_dir, "visium_benchmark_single_subunit_lr_candidates.csv"),
                   check.names = FALSE, stringsAsFactors = FALSE)
 rownames(lr_df) <- lr_df$cellchat_id
@@ -43,8 +42,8 @@ timing <- system.time({
 }, gcFirst = FALSE)
 peak_rss_mib <- if (rss_peak_reset) process_memory_mib("VmHWM") else NA_real_
 
-bin_index <- as.integer(result$bins$bin_id)
-spot_id <- spots$spot_id[bin_index]
+# 4. Preserve the native object, including local p-values and High-High calls.
+saveRDS(result, file.path(out, "visium_benchmark_blisa_result_10000_samples.rds"))
 lr <- result$LR_results
 lr_ids <- paste(lr$ligand.symbol, lr$receptor.symbol, sep = "__")
 summary <- data.frame(lr_id = lr_df$lr_id, returned = lr_df$lr_id %in% lr_ids,
@@ -52,28 +51,14 @@ summary <- data.frame(lr_id = lr_df$lr_id, returned = lr_df$lr_id %in% lr_ids,
 summary$native_status <- ifelse(summary$returned, "tested",
   ifelse(lr_df$ligand.symbol %in% eligible & lr_df$receptor.symbol %in% eligible,
           "native_filtered", "custom_filtered"))
-# 4. Export native High-High calls, p-values, quadrants and test availability.
-# Preserve all returned pairs and distinguish unavailable from nonsignificant.
-order_ids <- sort(lr_df$lr_id)
-current <- order_ids[order_ids %in% lr_ids]
-path <- file.path(out, "blisa_permutation_local_lri_results_10000_samples.csv.gz")
-con <- gzfile(path, open = "wt")
-for (j in seq_along(current)) {
-  i <- match(current[j], lr_ids)
+# Summarize all candidates for the method comparison, including filtered pairs.
+for (i in seq_len(nrow(lr))) {
   p <- lr$all_pval[[i]]
-  quadrant <- lr$all_quadrant[[i]]
   keep <- result$spatial_weights[[if (lr$ccc_mode[i] == "nearby") "keep_idx_queen" else "keep_idx_dist"]]
-  tested <- seq_len(nrow(spots)) %in% keep & is.finite(p)
-  significant <- seq_len(nrow(spots)) %in% lr$sig_index[[i]]
-  p[!tested] <- NA_real_
-  local <- data.frame(lr_id = lr_ids[i], spot_id = spot_id, p_value = p,
-                       tested = as.integer(tested), significant = ifelse(tested, as.integer(significant), NA_integer_),
-                       quadrant = as.character(quadrant))
-  write.table(local, con, sep = ",", row.names = FALSE, col.names = j == 1L, na = "NA")
+  tested <- seq_along(p) %in% keep & is.finite(p)
   summary$n_available[summary$lr_id == lr_ids[i]] <- sum(tested)
-  summary$n_sig[summary$lr_id == lr_ids[i]] <- if (any(tested)) sum(significant) else NA_integer_
+  summary$n_sig[summary$lr_id == lr_ids[i]] <- if (any(tested)) length(lr$sig_index[[i]]) else NA_integer_
 }
-close(con)
 summary$status <- ifelse(!summary$returned, "NR",
                          ifelse(summary$n_available > 0, "available", "NA"))
 summary$budget <- nperm

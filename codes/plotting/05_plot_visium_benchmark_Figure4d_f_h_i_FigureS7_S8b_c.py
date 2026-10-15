@@ -1,4 +1,4 @@
-"""Figure 4h-i, S7b and S8b-c from complete saved Visium benchmark CSVs.
+"""Figure 4h-i, S7b and S8b-c from saved Visium benchmark results.
 
 Spatial-map functions preserve the native 12 October 2026 report geometry,
 colours and ROI overlays. No inference, downloads or figure-specific data exports.
@@ -7,6 +7,8 @@ import argparse
 import json
 import os
 from pathlib import Path
+import subprocess
+import tempfile
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/ccc_visium_benchmark_mpl")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -240,10 +242,18 @@ MAP_YLIM = (min(spots.y.min(), roi.y.min())-SPOT_DIAMETER/2, max(spots.y.max(), 
 region_lookup = region_results.set_index(["lr_id", "region", "method"])
 # 2. Select the displayed LR rows from complete local results and join spot coordinates.
 # These are the native saved significance calls; no tests or summaries run here.
+# Read the required native BLISA rows through R into a temporary table.
+blisa_tables = tempfile.TemporaryDirectory(prefix="ccc_visium_blisa_maps_")
+blisa_local = Path(blisa_tables.name) / "local.csv"
+subprocess.run([os.environ.get("RSCRIPT_BIN", "Rscript"), "--vanilla",
+    str(repo / "codes/helpers/read_visium_blisa_results.R"),
+    str(RESULTS / "visium_benchmark_blisa_result_10000_samples.rds"),
+    str(DATA / "visium_benchmark_spot_annotations.csv"), str(blisa_local),
+    *sorted(selected_ids)], check=True)
 map_lookup = {}
 for method in METHODS:
     pcol = "bh_adjusted_p_value" if method == "stlearn_bh" else "p_value"
-    path = RESULTS / f"{STEMS[method]}_local_lri_results_10000_samples.csv.gz"
+    path = blisa_local if method == "blisa" else RESULTS / f"{STEMS[method]}_local_lri_results_10000_samples.csv.gz"
     frames = []
     for chunk in pd.read_csv(path, usecols=["lr_id", "spot_id", pcol, "tested", "significant"],
                              chunksize=200000):
@@ -253,6 +263,7 @@ for method in METHODS:
     shown["selected"] = shown.available & shown.significant.eq(1)
     for lr, frame in shown.rename(columns={pcol: "display_p_value"}).groupby("lr_id"):
         map_lookup[method, lr] = frame.set_index("spot_id").reindex(spots.spot_id)
+blisa_tables.cleanup()
 
 # 3. Draw individual manuscript map panels and regional-coverage heatmaps.
 fig = plt.figure(figsize=(7.2, 3.05))

@@ -3,6 +3,8 @@
 import argparse
 import os
 from pathlib import Path
+import subprocess
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -27,11 +29,19 @@ lookup = counts.set_index(["condition", "lr_id"])
 # 2. Read the saved native significance calls in bounded chunks.
 # Availability preserves failed/unreturned tests separately from nonsignificance.
 # BLISA's High-High classification is already encoded in its saved significant flag.
+# R reads the native BLISA object into a temporary table for Python; no duplicate
+# BLISA local-result CSV is kept in res/. The other methods retain their saved CSVs.
+blisa_tables = tempfile.TemporaryDirectory(prefix="ccc_visium_blisa_")
+blisa_local = Path(blisa_tables.name) / "local.csv"
+subprocess.run([os.environ.get("RSCRIPT_BIN", "Rscript"), "--vanilla",
+    str(args.repo_root / "codes/helpers/read_visium_blisa_results.R"),
+    str(results / "visium_benchmark_blisa_result_10000_samples.rds"),
+    str(data / "visium_benchmark_spot_annotations.csv"), str(blisa_local)], check=True)
 selections, regional = {}, []
 for method in methods:
     selected = np.zeros((len(ids), len(spots)), dtype=bool)
     pcol = "bh_adjusted_p_value" if method == "stlearn_bh" else "p_value"
-    path = results / f"{stems[method]}_local_lri_results_10000_samples.csv.gz"
+    path = blisa_local if method == "blisa" else results / f"{stems[method]}_local_lri_results_10000_samples.csv.gz"
     for chunk in pd.read_csv(path, usecols=["lr_id", "spot_id", pcol, "tested", "significant"],
                              chunksize=200000):
         i = chunk.lr_id.map(lr_index).to_numpy()
@@ -49,6 +59,7 @@ for method in methods:
         regional.append(pd.DataFrame(dict(method=method, lr_id=ids, region=region,
             n_total=int(roi.sum()), n_sig=hits, proportion=hits / roi.sum(),
             status=status.status.to_numpy())))
+blisa_tables.cleanup()
 
 # 3. Define shared eligibility independently of hotspot counts.
 common = set.intersection(*[set(counts.loc[

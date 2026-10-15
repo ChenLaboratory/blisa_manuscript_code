@@ -1,4 +1,4 @@
-# Visium preparation and CSV export helpers extracted from the executed manuscript analysis.
+# Visium preparation and resource-measurement helpers from the executed manuscript analysis.
 # Source after codes/helpers/source_data_helpers.R. Sourcing performs no analysis.
 
 visium_position_table <- function(spe) {
@@ -130,69 +130,6 @@ lr_panel_coverage_summary <- function(coverage) {
     coverage_percent = ifelse(n_database > 0L, 100 * n_covered / n_database, NA_real_),
     stringsAsFactors = FALSE
   )
-}
-
-visium_spot_table <- function(result, spe) {
-  output <- as.data.frame(result$LR_results, check.names = FALSE)
-  ids <- rownames(output)
-
-  cd <- as.data.frame(SummarizedExperiment::colData(spe), optional = TRUE)
-  before_count_filter <- which(cd$in_tissue == 1)
-  bin_index <- result$bins$bin_id
-
-  # visiumSpotBins numbers bins after its tissue filter, before its native count filter.
-  mapped <- before_count_filter[as.integer(bin_index)]
-
-  spot_ids <- colnames(spe)[mapped]
-  rows <- lapply(seq_len(nrow(output)), function(i) {
-    p <- output$all_pval[[i]]; score <- output$all_lisa[[i]]; q <- output$all_quadrant[[i]]
-    n <- nrow(result$bins)
-
-    mode <- as.character(output$ccc_mode[i])
-
-    keep <- if (mode == "nearby") result$spatial_weights$keep_idx_queen else result$spatial_weights$keep_idx_dist
-
-    tested <- rep(FALSE, n); tested[keep] <- TRUE
-    tested <- tested & is.finite(p)
-    sig_index <- output$sig_index[[i]]
-
-    sig <- rep(FALSE, n); sig[sig_index] <- TRUE
-
-    p[!tested] <- NA_real_; score[!tested] <- NA_real_
-    data.frame(lr_id = ids[i], spot_id = spot_ids, p_value = p,
-      score = score, tested = tested, native_significant = sig,
-      quadrant = as.character(q), stringsAsFactors = FALSE)
-  })
-  do.call(rbind, rows)
-}
-
-lri_result_summary <- function(result) {
-  x <- as.data.frame(result$LR_results, check.names = FALSE)
-  ids <- rownames(x)
-
-  n_bins <- nrow(result$bins)
-
-  tested <- integer(nrow(x))
-  for (i in seq_len(nrow(x))) {
-    p <- x$all_pval[[i]]
-
-    available <- is.finite(p)
-    # Native BLISA can leave finite placeholders in isolated bins. Intersect
-    # with the spatial-mode mask so these do not inflate the tested count.
-    mode <- as.character(x$ccc_mode[i])
-    key <- if (mode == "nearby") "keep_idx_queen" else "keep_idx_dist"
-    available <- available & seq_len(n_bins) %in% result$spatial_weights[[key]]
-    tested[i] <- sum(available)
-  }
-  scalar <- vapply(x, function(column) is.atomic(column) && is.null(dim(column)), logical(1))
-  output <- x[, scalar, drop = FALSE]
-  output$rank <- seq_len(nrow(x))
-  output$lr_id <- ids
-  output$n_tested <- tested
-  output$n_total_bins <- rep(n_bins, nrow(x))
-  output <- output[, c("rank", "lr_id", setdiff(names(output), c("rank", "lr_id"))), drop = FALSE]
-  rownames(output) <- NULL
-  output
 }
 
 measure_blisa_call <- function(expr, sample_interval_seconds = 0.1) {
@@ -376,11 +313,4 @@ visium_qc_dimensions <- function(spe, database) {
     "Detected gene symbols" = length(unique(rownames(spe)[detected])),
     "Spots" = ncol(spe), "Panel-covered LR pairs" = sum(coverage$panel_covered),
     "Panel-covered CellChatDB pathways" = length(pathways))
-}
-
-# Keep the complete spot results in one compressed CSV; large files remain local.
-write_visium_spot_csv <- function(x, directory) {
-  dir.create(directory, recursive = TRUE, showWarnings = FALSE)
-  data.table::fwrite(x, file.path(directory, "lri_by_spot.csv.gz"),
-    compress = "gzip", na = "NA", quote = "auto")
 }

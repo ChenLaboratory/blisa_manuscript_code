@@ -78,7 +78,7 @@ overlap_plot <- jaccard_summary(overlap, pooled, common_ids, methods, labels, co
   NULL, sprintf("Pooled (%d common LRs)", length(common_ids)), NULL) + labs(caption = NULL)
 save_plot(overlap_plot, "figure4c", 6.9, 5.52)
 
-# 4. Pass exact saved polygons and annotations to the Python map drawing code.
+# 4. Pass saved polygons, annotations and native BLISA tests to Python.
 # Temporary plotting tables are derived inputs, not additional repository results.
 geometry_dir <- tempfile("xenium_benchmark_geometry_")
 dir.create(geometry_dir)
@@ -91,6 +91,21 @@ vertices <- do.call(rbind, lapply(seq_len(nrow(binned$bins)), function(i) {
 }))
 write_csv(vertices, file.path(geometry_dir, "hexagons.csv"))
 write_csv(paperROIBorderPaths(binned$paper_rois), file.path(geometry_dir, "roi_paths.csv"))
+result <- readRDS(file.path(result_dir, "xenium_benchmark_blisa_result.rds"))
+lr <- result$LR_results
+sample_ids <- metadata$sample_id[match(result$bins$bin_id, metadata$bin_id)]
+local <- do.call(rbind, lapply(seq_len(nrow(lr)), function(i) {
+  keep <- result$spatial_weights[[if (lr$ccc_mode[i] == "nearby")
+    "keep_idx_queen" else "keep_idx_dist"]]
+  available <- seq_len(nrow(result$bins)) %in% keep & is.finite(lr$all_pval[[i]]) &
+    is.finite(lr$all_lisa[[i]])
+  data.frame(method = "blisa", lr_id = paste(lr$ligand.symbol[i],
+    lr$receptor.symbol[i], sep = "__"), sample_id = sample_ids,
+    p_value = ifelse(available, sprintf("%.17g", lr$all_pval[[i]]), NA_character_),
+    local_available = available,
+    significant = seq_len(nrow(result$bins)) %in% lr$sig_index[[i]])
+}))
+write_csv(local, file.path(geometry_dir, "blisa_local.csv"))
 python <- Sys.getenv("CCC_PYTHON", unset = Sys.which("python3"))
 status <- system2(python, c(shQuote(repo_path("codes", "plotting",
   "04_plot_xenium_benchmark_spatial_Figure4g_FigureS6_S8a.py")),

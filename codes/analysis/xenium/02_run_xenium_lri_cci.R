@@ -2,7 +2,6 @@
 # Faithful manuscript settings: 9,999 permutations and four CPU threads.
 # No random seed was recorded for the original Xenium run; no new seed is imposed.
 source("codes/helpers/source_data_helpers.R")
-source(repo_path("codes", "analysis", "xenium", "xenium_helpers.R"))
 suppressPackageStartupMessages(library(blisa))
 
 # 1. Load the prepared 50-micrometre bin counts and cell-type expression.
@@ -15,6 +14,8 @@ result <- blisa::blisa(binned$counts_matrix, bins = binned$bins,
   n_cells_col = "n_cells", counts_by_group = binned$counts_by_group,
   nsim = 9999, cpu_threads = 4L)
 
-# 3. Export full CSV results and retain reusable spatial geometry with the input.
-binned <- write_xenium_results(result, binned)
-saveRDS(binned, input)
+# 3. Save the native result, including LR tests, spatial weights and CCI scores.
+# Counts, cell annotations and ROI geometry remain in the processed input.
+out <- repo_path("res", "xenium")
+dir.create(out, recursive = TRUE, showWarnings = FALSE)
+saveRDS(result, file.path(out, "xenium_blisa_result.rds"))

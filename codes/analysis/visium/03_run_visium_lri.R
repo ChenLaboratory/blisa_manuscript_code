@@ -1,10 +1,10 @@
-# Run the recorded native Visium analysis; output every returned LR pair and spot as CSV.
+# Run the recorded native Visium analysis and save its complete BLISA object.
 # The original main analysis used nsim=9999 (distinct from benchmark nperm=10000).
 source(file.path(Sys.getenv("CCC_REPO_ROOT", unset = "."),
                  "codes", "helpers", "source_data_helpers.R"))
 source(repo_path("codes", "analysis", "visium", "visium_helpers.R"))
 require_packages(c("blisa", "SpatialExperiment", "SummarizedExperiment", "Matrix",
-                   "callr", "ps", "data.table"))
+                   "callr", "ps"))
 # 1. Load the annotated count input and expression-filtered CellChat candidates.
 spe <- readRDS(repo_path("Data", "generated", "visium", "visium_qc_counts_gt3000_annotated.rds"))
 
@@ -31,8 +31,5 @@ performance <- data.frame(method = "BLISA", nsim = 9999L, cpu_threads = 4L,
   memory_scope = measurement$performance$memory_scope)
 write_csv(performance, repo_path("res", "visium", "visium_blisa_computation_resources.csv"))
 
-# 4. Export native LR summaries and every spot-level test, including untested spots.
-local <- visium_spot_table(res, spe)
-summary <- lri_result_summary(res)
-write_csv(summary, repo_path("res", "visium", "lri_summary.csv"))
-write_visium_spot_csv(local, repo_path("res", "visium"))
+# 4. Preserve native LR rankings, local tests, bin geometry and spatial weights.
+saveRDS(res, repo_path("res", "visium", "visium_blisa_result.rds"))

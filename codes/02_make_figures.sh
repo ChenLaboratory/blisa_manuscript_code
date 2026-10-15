@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate panels from existing processed inputs and CSV results.
+# Generate panels from existing processed inputs and saved analysis results.
 # Usage: bash codes/02_make_figures.sh [all|xenium|visium|aligned_comparison|xenium_benchmark|visium_benchmark]
 set -euo pipefail
 

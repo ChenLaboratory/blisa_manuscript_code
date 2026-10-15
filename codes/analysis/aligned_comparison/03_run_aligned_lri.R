@@ -1,8 +1,7 @@
 #!/usr/bin/env Rscript
 # Two matched-platform analyses for Figure 3f-h and Figure S5.
-# No 50-micrometre third arm, plotting, downloads, or native-result RDS exports.
+# Save each native BLISA result for the comparison and plotting steps.
 source("codes/helpers/source_data_helpers.R")
-source(repo_path("codes", "analysis", "aligned_comparison", "alignment_helpers.R"))
 suppressPackageStartupMessages({library(SpatialExperiment); library(blisa)})
 
 # 1. Restrict both overlap inputs to shared genes and identical spot coordinates.
@@ -50,17 +49,8 @@ visium_result <- run_arm(v)
 xenium_result <- run_arm(xv)
 
 # 4. Save complete native results for each platform.
-# Long tables preserve every LR x retained-spot observation. Native sig_index
-# defines High-High hotspots; isolated/unavailable observations remain untested.
+# These retain LR statistics, High-High hotspot indices and spatial weights.
 out <- repo_path("res", "aligned_overlap")
-for (name in c("visium", "xenium")) {
-  result <- if (name == "visium") visium_result else xenium_result
-  summary <- summarize_blisa(result, name)
-
-  summary$rank <- seq_len(nrow(summary))
-  write_csv(summary, file.path(out, paste0(name, "_lri_summary.csv")))
-  local <- blisa_spot_table(result, name)
-  local <- local[, c("database_id", "spot_id", "p_value", "lisa", "quadrant",
-    "tested", "significant")]
-  write_csv(local, file.path(out, paste0(name, "_lri_by_spot.csv")))
-}
+dir.create(out, recursive = TRUE, showWarnings = FALSE)
+saveRDS(visium_result, file.path(out, "visium_blisa_result.rds"))
+saveRDS(xenium_result, file.path(out, "xenium_blisa_result.rds"))

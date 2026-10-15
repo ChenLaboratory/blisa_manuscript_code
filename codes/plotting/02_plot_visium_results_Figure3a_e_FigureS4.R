@@ -1,5 +1,5 @@
 # Regenerate Figure 3a-e and Supplementary Figure S4 from the processed SPE and
-# saved LRI/pathway CSVs. Run 04_summarize_visium_lri_pathways.R first.
+# native LRI/pathway objects. Run 04_summarize_visium_lri_pathways.R first.
 # 1. Load the shared spatial layouts and original report styling.
 source(file.path(Sys.getenv("CCC_REPO_ROOT", unset = "."),
                  "codes", "helpers", "source_data_helpers.R"))
@@ -7,7 +7,7 @@ source(repo_path("codes", "analysis", "visium", "visium_helpers.R"))
 source(repo_path("codes", "helpers", "plotting_helpers.R"))
 source(repo_path("codes", "helpers", "manuscript_plotting_helpers.R"))
 require_packages(c("blisa", "SpatialExperiment", "SummarizedExperiment", "S4Vectors",
-  "ggplot2", "scales", "gridExtra", "data.table", "R.utils", "ComplexHeatmap", "circlize",
+  "ggplot2", "scales", "gridExtra", "ComplexHeatmap", "circlize",
   "scider", "sf", "ggnewscale"))
 suppressPackageStartupMessages({
   library(ggplot2)
@@ -313,12 +313,10 @@ save_panel <- function(plot, panel, width, height) {
 # 2. Read the processed image/spot input and saved LR/pathway results.
 spe <- readRDS(repo_path("Data", "generated", "visium", "visium_qc_counts_gt3000_annotated.rds"))
 
-summary <- utils::read.csv(repo_path("res", "visium", "lri_summary.csv"),
-  check.names = FALSE, stringsAsFactors = FALSE)
-local <- as.data.frame(data.table::fread(repo_path("res", "visium", "lri_by_spot.csv.gz"),
-  select = c("lr_id", "spot_id", "p_value", "tested", "native_significant"),
-  na.strings = "NA"))
-summary <- summary[order(summary$rank), , drop = FALSE]
+res <- readRDS(repo_path("res", "visium", "visium_blisa_result.rds"))
+res_pathway <- readRDS(repo_path("res", "visium", "visium_blisa_pathway_result.rds"))
+summary <- res$LR_results
+summary$lr_id <- rownames(summary)
 
 spots <- as.data.frame(SummarizedExperiment::colData(spe), optional = TRUE)
 borders <- S4Vectors::metadata(spe)$pathology$borders_visium_pixels
@@ -332,47 +330,8 @@ raster <- SpatialExperiment::imgRaster(spe, sample_id = visium$sample_id,
 background <- list(image = raster, width = ncol(raster), height = nrow(raster),
                     scale = images$scaleFactor[image_index])
 
-# Rebuild the native plotting object from complete CSV results. This reconstructs
-# significant lists only; it does not recompute weights, LRI or permutations.
-significant <- matrix(local$native_significant, nrow = ncol(spe))
-p_values <- matrix(local$p_value, nrow = ncol(spe))
-
-lr_native <- summary
-rownames(lr_native) <- summary$lr_id
-lr_native$sig_index <- I(lapply(seq_len(nrow(summary)), function(i) which(significant[, i])))
-lr_native$sig_pval <- I(lapply(seq_len(nrow(summary)), function(i)
-  p_values[significant[, i], i]))
-# With an image background, native plotHotspots draws img_x/img_y and uses the
-# sf geometry only for an invisible legend anchor. Retain the original SPE's
-# micrometre coordinates rather than substituting the inference lattice.
-image_xy <- SpatialExperiment::spatialCoords(spe)[,
-  c("pxl_col_in_fullres", "pxl_row_in_fullres"), drop = FALSE]
-
-bins <- sf::st_as_sf(data.frame(spot_id = colnames(spe),
-  img_x = image_xy[, 1], img_y = image_xy[, 2],
-  x = spe$grid_x_um, y = spe$grid_y_um), coords = c("x", "y"))
-res <- structure(list(LR_results = lr_native, bins = bins,
-  spatial_weights = NULL, CCI_scores = NULL, level = "lr"), class = c("blisa", "list"))
-# Restore the native pathway plotting structure from saved pathway results.
-# No pathway aggregation is performed by this plotting script.
-pathway <- read.csv(repo_path("res", "visium", "pathway_summary.csv"),
-  check.names = FALSE)
-pathway <- pathway[order(pathway$rank), ]
-pathway_hotspots <- as.data.frame(data.table::fread(repo_path("res", "visium",
-  "pathway_hotspots_by_spot.csv.gz")))
-pathway_pairs <- read.csv(repo_path("res", "visium", "pathway_lr_pairs.csv"))
-pathway_rows <- lapply(pathway$pathway, function(id)
-  pathway_hotspots[pathway_hotspots$pathway == id, , drop = FALSE])
-rownames(pathway) <- pathway$pathway
-pathway$sig_index <- I(lapply(pathway_rows, function(x) match(x$spot_id, colnames(spe))))
-pathway$sig_pval <- I(lapply(pathway_rows, function(x) x$p_value))
-pathway$LR_pairs <- I(lapply(pathway$pathway, function(id)
-  pathway_pairs$lr_id[pathway_pairs$pathway == id]))
-pathway$top_LR_pair <- I(lapply(pathway_rows, function(x)
-  strsplit(x$top_lr_pairs, ";", fixed = TRUE)))
-res_pathway <- structure(list(LR_results = pathway, bins = bins,
-  spatial_weights = NULL, CCI_scores = NULL, level = "pathway"),
-  class = c("blisa", "list"))
+# LR and pathway ranks, hotspots and image coordinates come directly from the
+# saved native objects. Pathway aggregation remains in the analysis script.
 # Keep the source chunk names below; these aliases refer to the same annotated
 # native-feature SPE and already registered borders loaded above.
 spe_qc <- spe
@@ -409,7 +368,14 @@ save_panel(p_lr_rank, "figure3b", 7.2, 5.4)
 
 # Figure 3c: original PPIA_BSG maps, arranged as in the updated manuscript.
 pair <- summary[summary$lr_id == "PPIA_BSG", , drop = FALSE]
-
+# Format this pair's existing native tests for the report's custom triptych.
+spot_index <- which(spe$in_tissue == 1)[as.integer(res$bins$bin_id)]
+keep <- if (pair$ccc_mode == "nearby") res$spatial_weights$keep_idx_queen else
+  res$spatial_weights$keep_idx_dist
+local <- data.frame(lr_id = pair$lr_id, spot_id = colnames(spe)[spot_index],
+  p_value = pair$all_pval[[1]],
+  tested = seq_len(nrow(res$bins)) %in% keep & is.finite(pair$all_pval[[1]]),
+  native_significant = seq_len(nrow(res$bins)) %in% pair$sig_index[[1]])
 save_panel(lr_triptych(spe, pair, local, background, borders = borders),
            "figure3c", 7.2, 6.2)
 

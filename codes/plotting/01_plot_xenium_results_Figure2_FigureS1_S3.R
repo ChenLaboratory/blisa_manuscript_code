@@ -1,7 +1,7 @@
 # Run from the repository root. --main-only renders Figure 2; --supp-only S1-S3.
 # Layout source: run_blisa_on_xenium.pdf pages 3, 8, 14, 22 and 27.
-# Plotting reads processed inputs and saved summaries; it never runs analysis.
-# 1. Load processed geometry, complete LRI/CCI results and analysis summaries.
+# Plotting reads the native BLISA result and processed inputs; no LRI tests run.
+# 1. Load the native result, processed geometry and regional proportions.
 source("codes/helpers/source_data_helpers.R")
 source(repo_path("codes", "helpers", "plotting_helpers.R"))
 source(repo_path("codes", "helpers", "manuscript_plotting_helpers.R"))
@@ -14,43 +14,20 @@ suppressPackageStartupMessages({
   library(Matrix)
 })
 binned <- readRDS(repo_path("Data", "generated", "xenium", "xenium_50um_binned.rds"))
-read_result <- function(name) read.csv(repo_path("res", "xenium", name),
+res <- readRDS(repo_path("res", "xenium", "xenium_blisa_result.rds"))
+regional <- read.csv(repo_path("res", "xenium", "xenium_lri_regional_coverage.csv"),
   check.names = FALSE, stringsAsFactors = FALSE)
-summary <- read_result("lri_summary.csv")
-local <- read_result("lri_by_bin.csv")
-cci <- read_result("cci_scores.csv")
-dominant <- read_result("xenium_dominant_celltype_pairs_by_bin.csv")
-regional <- read_result("xenium_lri_regional_coverage.csv")
-pair_frequencies <- read_result("xenium_dominant_celltype_pair_frequencies.csv")
-lr_ids <- summary$lr_id
+lr <- res$LR_results
+cci <- res$CCI_scores
+lr_ids <- rownames(lr)
 selected <- "CXCL12_CXCR4"
 
 other_lr <- setdiff(lr_ids, selected)
 
 save_panel <- save_figure_panel
 roi_colours <- c(Invasive_Tumor = "#377EB8", DCIS_1 = "#4DAF4A", DCIS_2 = "#006D2C")
-aligned_rows <- function(table, id) {
-  rows <- table[table$lr_id == id, , drop = FALSE]
-  index <- match(binned$bins$bin_id, rows$bin_id)
 
-  rows[index, , drop = FALSE]
-}
-
-# 2. Reassemble the native plotting object from complete CSVs. This is formatting,
-# not a second significance calculation or an inference-result RDS dependency.
-lr <- summary[, setdiff(names(summary), c("rank", "lr_id", "n_tested", "n_total_bins")),
-  drop = FALSE]
-rownames(lr) <- lr_ids
-rows_by_lr <- lapply(lr_ids, function(id) aligned_rows(local, id))
-lr$sig_index <- lapply(rows_by_lr, function(x) which(x$native_significant))
-lr$sig_pval <- lapply(rows_by_lr, function(x) x$p_value[x$native_significant])
-lr$all_pval <- lapply(rows_by_lr, function(x) x$p_value)
-lr$all_lisa <- lapply(rows_by_lr, function(x) x$score)
-lr$all_quadrant <- lapply(rows_by_lr, function(x) x$quadrant)
-res <- structure(list(LR_results = lr, bins = binned$bins,
-  spatial_weights = binned$spatial_weights, CCI_scores = cci, level = "lr"), class = "blisa")
-
-# 3. Define the shared maps and heatmap appearance.
+# 2. Define the shared maps and heatmap appearance.
 # Same expression palette, titles and bottom colour bars as lrExpressionMap()
 # in the source report. Expression panels do not have pathology outlines.
 expression_map <- function(partner, role) {
@@ -82,30 +59,18 @@ cci_heatmap <- function(id, limits = NULL) {
     colours = colours)
   heatmapGrob(plot, width = 3.6, height = 2.55)
 }
-dominant_map <- function(id) {
-  values <- aligned_rows(dominant, id)
-  ranked <- pair_frequencies[pair_frequencies$lr_id == id, ]
-  ranked <- ranked[order(ranked$rank), ]
-  shown <- head(ranked$cell_pair, 8)
-  bins <- binned$bins
-  # Preserve native labels, category palette and top-pair order. The full
-  # assignments were already exported; this does not recalculate CCI scores.
-  bins$cell_pair_plot <- ifelse(values$tested, "Non-Significant", "Empty")
-  hotspots <- values$native_significant
-  bins$cell_pair_plot[hotspots] <- ifelse(values$cell_pair[hotspots] %in% shown,
-    values$cell_pair[hotspots], "rare pairs")
-  bins$cell_pair_plot <- factor(bins$cell_pair_plot,
-    levels = c(shown, "rare pairs", "Non-Significant", "Empty"))
-  colours <- c(setNames(getFromNamespace("cols", "blisa")[seq_along(shown)], shown),
-    "rare pairs" = "#404040", "Non-Significant" = "#D3D3D3", Empty = "#FFFFFF")
-  p <- ggplot(bins) + geom_sf(aes(fill = cell_pair_plot), colour = NA) +
-    scale_fill_manual(values = colours, drop = FALSE, labels = cellLabel) +
-    guides(fill = guide_legend(title = if (nrow(ranked) <= 8) "All pairs" else "Top 8 pairs")) +
-    labs(title = "Spatial CCI") + theme_void() + spatialTheme(7.5, "right")
-  addPaperROIBorders(p, binned$paper_rois)
+dominant_map <- function(id, roi_linewidth = 0.45) {
+  # Native plotting assigns sender-receiver pairs from processed expression and
+  # saved hotspots/neighbours. It does not rerun LRI tests or permutations.
+  p <- blisa::plotCCIspatial(res, counts_by_group = binned$counts_by_group,
+    index = match(id, lr_ids), top_pairs = 8) +
+    labs(title = "Spatial CCI") + spatialTheme(7.5, "right")
+  fill_scale <- p$scales$get_scales("fill")
+  fill_scale$labels <- cellLabel
+  addPaperROIBorders(p, binned$paper_rois, linewidth = roi_linewidth)
 }
 
-# 4. Draw the main panels.
+# 3. Draw the main panels.
 # Figure 2a, report page 3: native scider axes, original cell labels and ROI paths.
 if (!"--supp-only" %in% commandArgs(trailingOnly = TRUE)) {
 cells <- binned$cells_metadata
@@ -171,7 +136,7 @@ save_panel(cci_heatmap(selected), "figure2e", 3.6, 2.55)
 save_panel(dominant_map(selected), "figure2f", 3.6, 2.55)
 }
 
-# 5. Draw supplementary panels from the same complete results.
+# 4. Draw supplementary panels from the same native result.
 # Supplementary panels retain native LR rank, excluding the main-text example.
 if (!"--main-only" %in% commandArgs(trailingOnly = TRUE)) {
   source(repo_path("codes", "helpers", "xenium_supplementary_plotting.R"))

@@ -6,6 +6,9 @@ source(file.path(Sys.getenv("CCC_REPO_ROOT", unset = "."),
 result_dir <- repo_path("res", "benchmarks", "xenium")
 summary <- read.csv(file.path(result_dir, "xenium_benchmark_lr_summary.csv"))
 local <- read.csv(file.path(result_dir, "xenium_benchmark_lri_by_bin.csv.gz"))
+# Older cached CSVs also contain BLISA rows; use the native object for BLISA.
+local <- local[local$method != "blisa", ]
+result <- readRDS(file.path(result_dir, "xenium_benchmark_blisa_result.rds"))
 bins <- readRDS(repo_path("Data", "generated", "xenium",
                          "xenium_50um_binned.rds"))$bins_metadata
 methods <- c("blisa", "stlearn", "spatialdm")
@@ -18,6 +21,11 @@ common_ids <- Reduce(intersect, lapply(methods, function(method) {
 }))
 sets <- split(local$sample_id[local$significant],
               paste(local$method[local$significant], local$lr_id[local$significant], sep = "::"))
+sample_ids <- bins$sample_id[match(result$bins$bin_id, bins$bin_id)]
+lr_ids <- paste(result$LR_results$ligand.symbol, result$LR_results$receptor.symbol, sep = "__")
+blisa_sets <- setNames(lapply(result$LR_results$sig_index, function(index) sample_ids[index]),
+                      paste("blisa", lr_ids, sep = "::"))
+sets <- c(blisa_sets, sets)
 
 # 3. Compare significant-bin sets for every LR and ordered method pair.
 # An empty union has an undefined Jaccard score; unavailable tests remain missing.

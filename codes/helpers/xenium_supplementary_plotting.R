@@ -1,9 +1,9 @@
 # S1-S3: assemble the eleven non-CXCL12-CXCR4 pairs in native LR rank.
-# Called by 01_plot_xenium_results_Figure2_FigureS1_S3.R after reading full CSVs.
+# Called by 01_plot_xenium_results_Figure2_FigureS1_S3.R after reading the BLISA RDS.
 # Layout reference: manuscript_supp_figures/xenium_{hotspot_pvalues,
 # cci_heatmaps,spatial_cci}.pdf. No inference is performed here.
 supp_title <- function(id) sprintf("%s (%s significant hotspots)",
-  gsub("_", "\u2013", id), format(summary$sig_numbers[match(id, lr_ids)], big.mark = ","))
+  gsub("_", "\u2013", id), format(lr$sig_numbers[match(id, lr_ids)], big.mark = ","))
 supp_layout <- function(panels, legend, title) {
   gridExtra::arrangeGrob(grobs = c(panels, list(legend)), ncol = 3,
     top = grid::textGrob(title, x = grid::unit(2, "mm"), hjust = 0,
@@ -16,12 +16,17 @@ roi_legend <- ComplexHeatmap::Legend(title = "ROI boundaries",
   labels_gp = grid::gpar(fontsize = 8))
 warm_colours <- c("#FFFFCC", "#FFD700", "#FF7F00", "#D7301F")
 hotspot_panels <- lapply(other_lr, function(id) {
-  values <- aligned_rows(local, id)
-  bins <- binned$bins
-  bins$.background <- ifelse(values$tested, "#D3D3D3", "#FFFFFF")
-  bins$.p <- pmin(4, -log10(pmax(values$p_value, 1e-4)))
+  index <- match(id, lr_ids)
+  bins <- res$bins
+  # Display the saved native p-values and hotspot indices. The weight mask
+  # identifies bins included in the corresponding nearby/distant LRI test.
+  weight_key <- if (lr$ccc_mode[index] == "nearby") "keep_idx_queen" else "keep_idx_dist"
+  tested <- seq_len(nrow(bins)) %in% res$spatial_weights[[weight_key]] &
+    is.finite(lr$all_pval[[index]]) & !is.na(lr$all_quadrant[[index]])
+  bins$.background <- ifelse(tested, "#D3D3D3", "#FFFFFF")
+  bins$.p <- pmin(4, -log10(pmax(lr$all_pval[[index]], 1e-4)))
   p <- ggplot(bins) + geom_sf(fill = bins$.background, colour = NA) +
-    geom_sf(data = bins[values$native_significant, ], aes(fill = .p), colour = NA) +
+    geom_sf(data = bins[lr$sig_index[[index]], ], aes(fill = .p), colour = NA) +
     scale_fill_gradientn(colours = warm_colours, limits = c(-log10(0.05), 4),
       guide = "none") + theme_void() + labs(title = supp_title(id)) +
     theme(plot.title = element_text(size = 9, face = "bold", hjust = 0.5),
@@ -70,29 +75,23 @@ save_panel(supp_layout(cci_panels, cci_legend,
   "Xenium | LR-specific CCI heatmaps"), "figureS2", 11.7, 12.76)
 
 dominant_panels <- lapply(other_lr, function(id) {
-  values <- aligned_rows(dominant, id)
-  ranked <- pair_frequencies[pair_frequencies$lr_id == id, ]
-  ranked <- ranked[order(ranked$rank), ]
-  shown <- head(ranked$cell_pair, 8)
-  bins <- binned$bins
-  bins$.pair <- ifelse(values$tested, "Non-significant", "Untested")
-  bins$.pair[values$native_significant] <- ifelse(values$cell_pair[values$native_significant] %in% shown,
-    values$cell_pair[values$native_significant], "Rare pairs")
-  bins$.pair <- factor(bins$.pair, levels = c(shown, "Rare pairs", "Non-significant", "Untested"))
-  pair_rows <- values[match(shown, values$cell_pair), ]
-  pair_labels <- paste(cellLabel(pair_rows$sender), "\u2192", cellLabel(pair_rows$receiver))
-  colours <- c(setNames(getFromNamespace("cols", "blisa")[seq_along(shown)], shown),
-    "Rare pairs" = "#404040", "Non-significant" = "#D3D3D3", Untested = "#FFFFFF")
-  p <- ggplot(bins) + geom_sf(aes(fill = .pair), colour = NA) +
-    scale_fill_manual(values = colours, drop = FALSE,
-      labels = c(pair_labels, "Rare pairs", "Non-significant", "Untested"),
-      name = "Sender \u2192 receiver") + theme_void() + spatialTheme(7.5, "right") +
+  p <- dominant_map(id, roi_linewidth = 0.3) +
+    guides(fill = guide_legend(title = "Sender \u2192 receiver")) +
     labs(title = supp_title(id)) + theme(
       plot.title = element_text(size = 9, face = "bold", hjust = 0.5),
       legend.text = element_text(size = 5.8), legend.title = element_text(size = 6.5, face = "bold"),
       legend.key.height = grid::unit(1.8, "mm"), legend.key.width = grid::unit(1.8, "mm"),
       plot.margin = margin(4, 4, 4, 4))
-  addPaperROIBorders(p, binned$paper_rois, linewidth = 0.3)
+  # Keep the supplementary legend wording while using native pair assignments.
+  fill_scale <- p$scales$get_scales("fill")
+  fill_scale$labels <- function(x) {
+    labels <- gsub(" -> ", " \u2192 ", cellLabel(x), fixed = TRUE)
+    labels[x == "rare pairs"] <- "Rare pairs"
+    labels[x == "Non-Significant"] <- "Non-significant"
+    labels[x == "Empty"] <- "Untested"
+    labels
+  }
+  p
 })
 dominant_legend <- grid::grid.grabExpr({
   ComplexHeatmap::draw(roi_legend, y = grid::unit(0.68, "npc"))
